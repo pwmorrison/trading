@@ -20,3 +20,4 @@ I wonder if the following will work:
 * Have a well-defined goal, such as "buy at the start of the day, and sell at the end of the day, or at a trailing stop". Then, I can run over the training set and use this rule to specify if that trade would be profitable on that day, for that stock. This becomes the (binary) target of the ML.
     * I'd need intra-day data to work out the trailing stops.
 * Use a number of inputs that make sense, such as the past days' OHLCV, sentiment, bollinger bands, moving average values, maybe other indicators such as bull/bear market, sector, etc. 
+* I probably need to play with the objective function, since there will be a lot more "not trades" than "trades". I'd also prefer to have few false-positives, and it won't matter much if I have some false-negatives.
