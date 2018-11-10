@@ -77,6 +77,10 @@ def main():
     df_trends = extract_trend_target(df, n_days, increase_thresh, start, end)
     # print(df_trends[[start, end, 'end_shift', 'diff', 'diff_percent', 'y']].head())
 
+    # Drop the last n_days rows, since we don't have the future data for these.
+    df_trends = df_trends.dropna()
+    # df_trends = df_trends.drop(df_trends.index[-n_days:])
+
     # df_trends['diff_percent'].plot()
     # plt.show()
 
@@ -88,7 +92,11 @@ def main():
     features.append(Feature("close_3", 3, "close"))
 
     df_features = extract_trend_features(df_trends, features)
+
+    df_features = df_features.dropna()
+
     print(df_features.head(10))
+    print(df_features.tail(10))
 
 if __name__ == '__main__':
     main()
