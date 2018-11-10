@@ -1,5 +1,10 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix
+from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 
 pd.set_option('display.width', 150)
 
@@ -95,8 +100,64 @@ def main():
 
     df_features = df_features.dropna()
 
+    # Convert the boolean to 0/1.
+    df_features['y'] = df_features['y'].astype(int)
+
     print(df_features.head(10))
     print(df_features.tail(10))
+
+    # Split into train and test DataFrames.
+    n_train_rows = int(df_features.shape[0] * 0.8)
+    df_train = df_features.iloc[:n_train_rows]
+    df_test = df_features.iloc[n_train_rows:]
+    print(df_features.shape, df_train.shape, df_test.shape)
+
+    class_counts = df_test['y'].value_counts()
+    print(class_counts)
+
+    # Weights for the samples.
+    # negative_weight = 1 - float(class_counts[0]) / df_test.shape[0]
+    # positive_weight = 1 - float(class_counts[1]) / df_test.shape[0]
+    # df_train['weights'] = df_train['y'].apply(lambda x: negative_weight if x == 0 else positive_weight)
+
+    prediction_features = ['open', 'close_1', 'close_2', 'close_3']
+    X =df_train[prediction_features]
+    y = df_train['y']
+
+    # Standarize features
+    scaler = StandardScaler()
+    X_std = scaler.fit_transform(X)
+
+    clf = LogisticRegression(random_state=0, solver='lbfgs', class_weight='balanced').fit(X_std, y)
+
+    X_test = df_test[prediction_features]
+    y_test = df_test['y']
+    X_test_std = scaler.transform(X_test)
+
+    y_pred = clf.predict(X_test_std)
+    score = clf.score(X_test_std, y_test)
+    print(score)
+
+    # A confusion matrix shows that it's always predicting '0'.
+    conf_matrix = confusion_matrix(y_test, y_pred)
+    tn, fp, fn, tp = conf_matrix.ravel()
+    print(conf_matrix)
+    print("tn: {}, fp: {}, fn: {}, tp: {}".format(tn, fp, fn, tp))
+
+    print(clf.get_params())
+
+    if 0:
+        # A simple linear regression, just to see if it's working.
+        # Should give ~1 for the 'close_3' coefficient, since it would be pretty similar to the close.
+        # Should give a 0 coefficient to 'volume'.
+        reg = LinearRegression().fit(df_train[['close_3', 'volume']], df_train['close'])
+        r_2 = reg.score(df_test[['close_3', 'volume']], df_test['close'])
+        print('Coefficients: \n', reg.coef_)
+        print(r_2)
+        y_pred = reg.predict(df_test[['close_3', 'volume']])
+        plt.scatter(y_pred, df_test['close'])
+        plt.show()
+
 
 if __name__ == '__main__':
     main()
