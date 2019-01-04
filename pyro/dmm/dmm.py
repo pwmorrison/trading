@@ -52,7 +52,7 @@ class Emitter(nn.Module):
         """
         h1 = self.relu(self.lin_z_to_hidden(z_t))
         h2 = self.relu(self.lin_hidden_to_hidden(h1))
-        ps = torch.sigmoid(self.lin_hidden_to_input(h2))
+        ps = torch.tanh(self.lin_hidden_to_input(h2))
         return ps
 
 
@@ -493,7 +493,14 @@ def main(args):
         sequence_output = np.concatenate(sequence_output, axis=1)
         print(sequence_output.shape)
 
-        plt.plot(sequence_output[0, :])
+        n_plots = 5
+        fig, axes = plt.subplots(nrows=n_plots, ncols=1)
+        x = range(sequence_output.shape[1])
+        for i in range(n_plots):
+            axes[i].plot(x, mini_batch[i, :].numpy())
+            axes[i].plot(x, sequence_output[i, :])
+
+        # plt.plot(sequence_output[0, :])
         plt.show()
 
     # helper function for doing evaluation
@@ -556,7 +563,7 @@ if __name__ == '__main__':
     assert pyro.__version__.startswith('0.3.0')
 
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', type=int, default=5) # 5000
+    parser.add_argument('-n', '--num-epochs', type=int, default=0) # 5000
     parser.add_argument('-lr', '--learning-rate', type=float, default=0.0003)
     parser.add_argument('-b1', '--beta1', type=float, default=0.96)
     parser.add_argument('-b2', '--beta2', type=float, default=0.999)
@@ -570,8 +577,8 @@ if __name__ == '__main__':
     parser.add_argument('-iafs', '--num-iafs', type=int, default=0)
     parser.add_argument('-id', '--iaf-dim', type=int, default=100)
     parser.add_argument('-cf', '--checkpoint-freq', type=int, default=1)
-    parser.add_argument('-lopt', '--load-opt', type=str, default='')#saved_opt.pt')
-    parser.add_argument('-lmod', '--load-model', type=str, default='')#''saved_model.pt')
+    parser.add_argument('-lopt', '--load-opt', type=str, default='saved_opt.pt')
+    parser.add_argument('-lmod', '--load-model', type=str, default='saved_model.pt')
     parser.add_argument('-sopt', '--save-opt', type=str, default='saved_opt.pt')
     parser.add_argument('-smod', '--save-model', type=str, default='saved_model.pt')
     parser.add_argument('--cuda', action='store_true')
