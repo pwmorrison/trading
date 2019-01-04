@@ -490,6 +490,40 @@ def main(args):
             # so keep track of it
             z_prev = z_t
 
+        # Run the model another few steps.
+        n_steps = 100
+        for t in range(1, n_steps + 1):
+            # first compute the parameters of the diagonal gaussian distribution p(z_t | z_{t-1})
+            z_loc, z_scale = dmm.trans(z_prev)
+
+            # then sample z_t according to dist.Normal(z_loc, z_scale)
+            # note that we use the reshape method so that the univariate Normal distribution
+            # is treated as a multivariate Normal distribution with a diagonal covariance.
+            with poutine.scale(scale=annealing_factor):
+                z_t = pyro.sample("z_%d" % t,
+                                  dist.Normal(z_loc, z_scale)
+                                  .mask(mini_batch_mask[:, t - 1:t])
+                                  .to_event(1))
+
+            # compute the probabilities that parameterize the bernoulli likelihood
+            emission_probs_t = dmm.emitter(z_t)
+
+            emission_probs_t_np = emission_probs_t.detach().numpy()
+            sequence_output.append(emission_probs_t_np)
+
+            # # the next statement instructs pyro to observe x_t according to the
+            # # bernoulli distribution p(x_t|z_t)
+            # pyro.sample("obs_x_%d" % t,
+            #             # dist.Bernoulli(emission_probs_t)
+            #             dist.Normal(emission_probs_t, 0.5)
+            #             .mask(mini_batch_mask[:, t - 1:t])
+            #             .to_event(1),
+            #             obs=mini_batch[:, t - 1, :])
+
+            # the latent sampled at this time step will be conditioned upon
+            # in the next time step so keep track of it
+            z_prev = z_t
+
         sequence_output = np.concatenate(sequence_output, axis=1)
         print(sequence_output.shape)
 
@@ -497,8 +531,10 @@ def main(args):
         fig, axes = plt.subplots(nrows=n_plots, ncols=1)
         x = range(sequence_output.shape[1])
         for i in range(n_plots):
-            axes[i].plot(x, mini_batch[i, :].numpy())
-            axes[i].plot(x, sequence_output[i, :])
+            input = mini_batch[i, :].numpy().squeeze()
+            output = sequence_output[i, :]
+            axes[i].plot(range(input.shape[0]), input)
+            axes[i].plot(range(len(output)), output)
 
         # plt.plot(sequence_output[0, :])
         plt.show()
