@@ -137,8 +137,8 @@ class DMM(nn.Module):
     This PyTorch Module encapsulates the model as well as the
     variational distribution (the guide) for the Deep Markov Model
     """
-    def __init__(self, input_dim=88, z_dim=100, emission_dim=100,
-                 transition_dim=200, rnn_dim=600, num_layers=1, rnn_dropout_rate=0.0,
+    def __init__(self, input_dim=88, z_dim=25, emission_dim=25,
+                 transition_dim=50, rnn_dim=150, num_layers=1, rnn_dropout_rate=0.0,
                  num_iafs=0, iaf_dim=50, use_cuda=False):
         super(DMM, self).__init__()
         # instantiate PyTorch modules used in the model and guide below
@@ -275,6 +275,11 @@ def generate_sine_wave_data(num_series=200, length=160):
         x_end = np.random.randint(30, 50)
         x = np.linspace(x_start, x_end, num=length)
         y = np.sin(x)
+        if 0:
+            # Make it a percent change (from 0 to 1).
+            y[y == 0] = 0.000001
+            y = np.diff(y) / np.abs(y[:-1])
+            y = np.insert(y, 0, 0., axis=0)
         y = np.expand_dims(np.expand_dims(y, -1), 0)
         series_list.append(y)
 
@@ -599,7 +604,7 @@ if __name__ == '__main__':
     assert pyro.__version__.startswith('0.3.0')
 
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', type=int, default=0) # 5000
+    parser.add_argument('-n', '--num-epochs', type=int, default=100) # 5000
     parser.add_argument('-lr', '--learning-rate', type=float, default=0.0003)
     parser.add_argument('-b1', '--beta1', type=float, default=0.96)
     parser.add_argument('-b2', '--beta2', type=float, default=0.999)
@@ -613,8 +618,8 @@ if __name__ == '__main__':
     parser.add_argument('-iafs', '--num-iafs', type=int, default=0)
     parser.add_argument('-id', '--iaf-dim', type=int, default=100)
     parser.add_argument('-cf', '--checkpoint-freq', type=int, default=1)
-    parser.add_argument('-lopt', '--load-opt', type=str, default='saved_opt.pt')
-    parser.add_argument('-lmod', '--load-model', type=str, default='saved_model.pt')
+    parser.add_argument('-lopt', '--load-opt', type=str, default='')#saved_opt.pt')
+    parser.add_argument('-lmod', '--load-model', type=str, default='')#saved_model.pt')
     parser.add_argument('-sopt', '--save-opt', type=str, default='saved_opt.pt')
     parser.add_argument('-smod', '--save-model', type=str, default='saved_model.pt')
     parser.add_argument('--cuda', action='store_true')
