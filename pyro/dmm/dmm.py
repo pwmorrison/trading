@@ -138,8 +138,8 @@ class DMM(nn.Module):
     This PyTorch Module encapsulates the model as well as the
     variational distribution (the guide) for the Deep Markov Model
     """
-    def __init__(self, input_dim=88, z_dim=25, emission_dim=25,
-                 transition_dim=50, rnn_dim=150, num_layers=1, rnn_dropout_rate=0.0,
+    def __init__(self, input_dim=88, z_dim=50, emission_dim=50,
+                 transition_dim=100, rnn_dim=300, num_layers=1, rnn_dropout_rate=0.0,
                  num_iafs=0, iaf_dim=50, use_cuda=False):
         super(DMM, self).__init__()
         # instantiate PyTorch modules used in the model and guide below
@@ -317,8 +317,8 @@ def generate_sine_wave_data(num_series=200, length=160):
     return data
 
 
-def generate_returns_data(num_series=200, length=160):
-    filename = r"EURUSD_hourly_2006to2017_returns.csv"
+def generate_returns_data(num_series=500, length=160):
+    filename = r"EURUSD_daily_2006to2017_returns.csv"
     df = pd.read_csv(filename, index_col=0)
     print(df.head())
 
@@ -601,6 +601,7 @@ def main(args):
             output = sequence_output[i, :]
             axes[i].plot(range(input.shape[0]), input)
             axes[i].plot(range(len(output)), output)
+            axes[i].grid()
 
         # plt.plot(sequence_output[0, :])
         plt.show()
@@ -665,7 +666,7 @@ if __name__ == '__main__':
     assert pyro.__version__.startswith('0.3.0')
 
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', type=int, default=100) # 5000
+    parser.add_argument('-n', '--num-epochs', type=int, default=0) # 5000
     parser.add_argument('-lr', '--learning-rate', type=float, default=0.0003)
     parser.add_argument('-b1', '--beta1', type=float, default=0.96)
     parser.add_argument('-b2', '--beta2', type=float, default=0.999)
