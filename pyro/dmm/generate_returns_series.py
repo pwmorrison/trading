@@ -7,8 +7,9 @@ Takes price series data, and generates returns data useful for machine learning 
 
 
 def main():
-    input_filename = r"C:\Users\pwmor\Zorro\History\EURUSD_hourly_2006to2017.csv"
-    output_filename = r"EURUSD_hourly_2006to2017_returns.csv"
+    # input_filename = r"C:\Users\pwmor\Zorro\History\EURUSD_hourly_2006to2017.csv"
+    input_filename = r"C:\Users\pwmor\Zorro\History\EURUSD_daily_2006to2017.csv"
+    output_filename = r"EURUSD_daily_2006to2017_returns.csv"
 
     price_df = pd.read_csv(input_filename, index_col=0)
 
