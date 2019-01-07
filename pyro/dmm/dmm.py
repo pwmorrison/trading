@@ -16,6 +16,7 @@ import argparse
 import time
 from os.path import exists
 import matplotlib.pyplot as plt
+import pandas as pd
 
 import numpy as np
 import torch
@@ -316,6 +317,62 @@ def generate_sine_wave_data(num_series=200, length=160):
     return data
 
 
+def generate_returns_data(num_series=200, length=160):
+    filename = r"EURUSD_hourly_2006to2017_returns.csv"
+    df = pd.read_csv(filename, index_col=0)
+    print(df.head())
+
+    # Scale the returns , so that they stretch to either -1 or 1, while keeping the 0 at 0.
+    min_return = df['Returns'].min()
+    max_return = df['Returns'].max()
+    scale = 1. / max(max_return, abs(min_return))
+    df['scaled_returns'] = df['Returns'] * scale
+    print(min_return, max_return, scale)
+    print(df['scaled_returns'].min(), df['scaled_returns'].max())
+
+    # Extract num_series random series from the returns data.
+    series_starts = np.random.randint(0, df.shape[0] - length, size=num_series)
+    print(series_starts)
+
+    series_list = []
+    for i in range(num_series):
+        start_index = series_starts[i]
+        y = df['scaled_returns'][start_index: start_index + length]
+        y = np.expand_dims(np.expand_dims(y, -1), 0)
+        series_list.append(y)
+
+    # Convert the series to a numpy array.
+    series_all = np.concatenate(series_list, axis=0)
+    print(series_all.shape)
+
+    # Split in to train/val/test.
+    train_portion = 0.8
+    val_portion = 0.1
+    num_train = int(num_series * train_portion)
+    num_val = int(num_series * val_portion)
+    num_test = num_series - num_train - num_val
+    series_train = series_all[:num_train]
+    series_val = series_all[num_train: num_train + num_val]
+    series_test = series_all[num_train + num_val:]
+
+    train_sequence_lengths = np.full(num_train, length)
+    val_sequence_lengths = np.full(num_val, length)
+    test_sequence_lengths = np.full(num_test, length)
+
+    series_train = torch.from_numpy(series_train).type(torch.FloatTensor)
+    series_val = torch.from_numpy(series_val).type(torch.FloatTensor)
+    series_test = torch.from_numpy(series_test).type(torch.FloatTensor)
+    train_sequence_lengths = torch.from_numpy(train_sequence_lengths)
+    val_sequence_lengths = torch.from_numpy(val_sequence_lengths)
+    test_sequence_lengths = torch.from_numpy(test_sequence_lengths)
+
+    # Form the data dictionary.
+    data = {
+        'train': {'sequences': series_train, 'sequence_lengths': train_sequence_lengths},
+        'valid': {'sequences': series_val, 'sequence_lengths': val_sequence_lengths},
+        'test': {'sequences': series_test, 'sequence_lengths': test_sequence_lengths},
+    }
+    return data
 
 # setup, training, and evaluation
 def main(args):
@@ -323,9 +380,13 @@ def main(args):
     log = get_logger(args.log)
     log(args)
 
-    if 1:
+    if 0:
         data = generate_sine_wave_data()
         input_dim = 1
+    elif 1:
+        data = generate_returns_data()
+        input_dim = 1
+        # return
     else:
         data = poly.load_data(poly.JSB_CHORALES)
         input_dim = 88
@@ -620,8 +681,8 @@ if __name__ == '__main__':
     parser.add_argument('-cf', '--checkpoint-freq', type=int, default=1)
     parser.add_argument('-lopt', '--load-opt', type=str, default='')#saved_opt.pt')
     parser.add_argument('-lmod', '--load-model', type=str, default='')#saved_model.pt')
-    parser.add_argument('-sopt', '--save-opt', type=str, default='saved_opt.pt')
-    parser.add_argument('-smod', '--save-model', type=str, default='saved_model.pt')
+    parser.add_argument('-sopt', '--save-opt', type=str, default='saved_opt_returns.pt')
+    parser.add_argument('-smod', '--save-model', type=str, default='saved_model_returns.pt')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--jit', action='store_true')
     parser.add_argument('-l', '--log', type=str, default='dmm.log')
