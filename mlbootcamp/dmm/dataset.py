@@ -20,6 +20,8 @@ class TickerDataset(Dataset):
 
         # Only keep tickers with length less than a minimum.
         ticker_files = glob.glob(str(Path(root_dir) / template))
+        if 1:
+            ticker_files = ticker_files[:100]
         self.ticker_files = []
         print(f'Finding tickers with sufficient length, from {len(ticker_files)} files.')
         for ticker_file in ticker_files:

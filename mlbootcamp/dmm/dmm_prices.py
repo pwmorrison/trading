@@ -35,10 +35,13 @@ from pyro.nn import AutoRegressiveNN
 from pyro.optim import ClippedAdam
 from util import get_logger
 
+from dataset import create_ticker_dataset
+from tsne import plot_tsne
+
 
 class Emitter(nn.Module):
     """
-    Parameterizes the bernoulli observation likelihood `p(x_t | z_t)`
+    Parameterizes the observation likelihood `p(x_t | z_t)`
     """
 
     def __init__(self, input_dim, z_dim, emission_dim):
@@ -282,112 +285,6 @@ class DMM(nn.Module):
                 z_prev = z_t
 
 
-def generate_sine_wave_data(num_series=200, length=160):
-    # Generate all the series.
-    series_list = []
-    for i in range(num_series):
-        x_start = np.random.randint(0, 20)
-        x_end = np.random.randint(30, 50)
-        x = np.linspace(x_start, x_end, num=length)
-        y = np.sin(x)
-        if 0:
-            # Make it a percent change (from 0 to 1).
-            y[y == 0] = 0.000001
-            y = np.diff(y) / np.abs(y[:-1])
-            y = np.insert(y, 0, 0., axis=0)
-        y = np.expand_dims(np.expand_dims(y, -1), 0)
-        series_list.append(y)
-
-    # Convert the series to a numpy array.
-    series_all = np.concatenate(series_list, axis=0)
-
-    # Split in to train/val/test.
-    train_portion = 0.8
-    val_portion = 0.1
-    num_train = int(num_series * train_portion)
-    num_val = int(num_series * val_portion)
-    num_test = num_series - num_train - num_val
-    series_train = series_all[:num_train]
-    series_val = series_all[num_train: num_train + num_val]
-    series_test = series_all[num_train + num_val:]
-
-    train_sequence_lengths = np.full(num_train, length)
-    val_sequence_lengths = np.full(num_val, length)
-    test_sequence_lengths = np.full(num_test, length)
-
-    series_train = torch.from_numpy(series_train).type(torch.FloatTensor)
-    series_val = torch.from_numpy(series_val).type(torch.FloatTensor)
-    series_test = torch.from_numpy(series_test).type(torch.FloatTensor)
-    train_sequence_lengths = torch.from_numpy(train_sequence_lengths)
-    val_sequence_lengths = torch.from_numpy(val_sequence_lengths)
-    test_sequence_lengths = torch.from_numpy(test_sequence_lengths)
-
-    # Form the data dictionary.
-    data = {
-        'train': {'sequences': series_train, 'sequence_lengths': train_sequence_lengths},
-        'valid': {'sequences': series_val, 'sequence_lengths': val_sequence_lengths},
-        'test': {'sequences': series_test, 'sequence_lengths': test_sequence_lengths},
-    }
-    return data
-
-
-def generate_returns_data(num_series=500, length=160):
-    filename = r"EURUSD_daily_2006to2017_returns.csv"
-    df = pd.read_csv(filename, index_col=0)
-    print(df.head())
-
-    # Scale the returns , so that they stretch to either -1 or 1, while keeping the 0 at 0.
-    min_return = df['Returns'].min()
-    max_return = df['Returns'].max()
-    scale = 1. / max(max_return, abs(min_return))
-    df['scaled_returns'] = df['Returns'] * scale
-    print(min_return, max_return, scale)
-    print(df['scaled_returns'].min(), df['scaled_returns'].max())
-
-    # Extract num_series random series from the returns data.
-    series_starts = np.random.randint(0, df.shape[0] - length, size=num_series)
-    print(series_starts)
-
-    series_list = []
-    for i in range(num_series):
-        start_index = series_starts[i]
-        y = df['scaled_returns'][start_index: start_index + length]
-        y = np.expand_dims(np.expand_dims(y, -1), 0)
-        series_list.append(y)
-
-    # Convert the series to a numpy array.
-    series_all = np.concatenate(series_list, axis=0)
-    print(series_all.shape)
-
-    # Split in to train/val/test.
-    train_portion = 0.8
-    val_portion = 0.1
-    num_train = int(num_series * train_portion)
-    num_val = int(num_series * val_portion)
-    num_test = num_series - num_train - num_val
-    series_train = series_all[:num_train]
-    series_val = series_all[num_train: num_train + num_val]
-    series_test = series_all[num_train + num_val:]
-
-    train_sequence_lengths = np.full(num_train, length)
-    val_sequence_lengths = np.full(num_val, length)
-    test_sequence_lengths = np.full(num_test, length)
-
-    series_train = torch.from_numpy(series_train).type(torch.FloatTensor)
-    series_val = torch.from_numpy(series_val).type(torch.FloatTensor)
-    series_test = torch.from_numpy(series_test).type(torch.FloatTensor)
-    train_sequence_lengths = torch.from_numpy(train_sequence_lengths)
-    val_sequence_lengths = torch.from_numpy(val_sequence_lengths)
-    test_sequence_lengths = torch.from_numpy(test_sequence_lengths)
-
-    # Form the data dictionary.
-    data = {
-        'train': {'sequences': series_train, 'sequence_lengths': train_sequence_lengths},
-        'valid': {'sequences': series_val, 'sequence_lengths': val_sequence_lengths},
-        'test': {'sequences': series_test, 'sequence_lengths': test_sequence_lengths},
-    }
-    return data
-
 # saves the model and optimizer states to disk
 def save_checkpoint(dmm, adam, log):
     log("saving model to %s..." % args.save_model)
@@ -395,6 +292,7 @@ def save_checkpoint(dmm, adam, log):
     log("saving optimizer states to %s..." % args.save_opt)
     adam.save(args.save_opt)
     log("done saving model and optimizer checkpoints to disk.")
+
 
 # loads the model and optimizer states from disk
 def load_checkpoint(dmm, adam, log):
@@ -405,6 +303,7 @@ def load_checkpoint(dmm, adam, log):
     log("loading optimizer states from %s..." % args.load_opt)
     adam.load(args.load_opt)
     log("done loading model and optimizer states.")
+
 
 # prepare a mini-batch and take a gradient step to minimize -elbo
 def process_minibatch(svi, epoch, mini_batch, n_mini_batches, which_mini_batch, shuffled_indices):
@@ -418,17 +317,10 @@ def process_minibatch(svi, epoch, mini_batch, n_mini_batches, which_mini_batch, 
         # by default the KL annealing factor is unity
         annealing_factor = 1.0
 
-    # compute which sequences in the training set we should grab
-    # mini_batch_start = (which_mini_batch * args.mini_batch_size)
-    # mini_batch_end = np.min([(which_mini_batch + 1) * args.mini_batch_size, N_train_data])
-    # mini_batch_indices = shuffled_indices[mini_batch_start:mini_batch_end]
-
-    if 1:
-        # Get a new batch from the data loader, and generate dummy data that we can feed into the below fn.
-        training_data_sequences = mini_batch.type(torch.FloatTensor)
-        # training_data_sequences = next(iter(dataloader)).type(torch.FloatTensor)
-        mini_batch_indices = torch.arange(0, training_data_sequences.size(0))
-        training_seq_lengths = torch.full((training_data_sequences.size(0),), training_data_sequences.size(1)).type(torch.IntTensor)
+    # Generate dummy data that we can feed into the below fn.
+    training_data_sequences = mini_batch.type(torch.FloatTensor)
+    mini_batch_indices = torch.arange(0, training_data_sequences.size(0))
+    training_seq_lengths = torch.full((training_data_sequences.size(0),), training_data_sequences.size(1)).type(torch.IntTensor)
 
     # grab a fully prepped mini-batch using the helper function in the data loader
     mini_batch, mini_batch_reversed, mini_batch_mask, mini_batch_seq_lengths \
@@ -442,21 +334,15 @@ def process_minibatch(svi, epoch, mini_batch, n_mini_batches, which_mini_batch, 
     # keep track of the training loss
     return loss
 
+
 # prepare a mini-batch and take a gradient step to minimize -elbo
-def test_minibatch(dmm, mini_batch, which_mini_batch, shuffled_indices):
+def test_minibatch(dmm, mini_batch):
 
-    # compute which sequences in the training set we should grab
-    # mini_batch_start = (which_mini_batch * args.mini_batch_size)
-    # mini_batch_end = np.min([(which_mini_batch + 1) * args.mini_batch_size, N_test_data])
-    # mini_batch_indices = shuffled_indices[mini_batch_start:mini_batch_end]
-
-    # Get a new batch from the data loader, and generate dummy data that we can feed into the below fn.
+    # Generate data that we can feed into the below fn.
     test_data_sequences = mini_batch.type(torch.FloatTensor)
-    # training_data_sequences = next(iter(dataloader)).type(torch.FloatTensor)
     mini_batch_indices = torch.arange(0, test_data_sequences.size(0))
     test_seq_lengths = torch.full((test_data_sequences.size(0),), test_data_sequences.size(1)).type(
         torch.IntTensor)
-
 
     # grab a fully prepped mini-batch using the helper function in the data loader
     mini_batch, mini_batch_reversed, mini_batch_mask, mini_batch_seq_lengths \
@@ -539,15 +425,6 @@ def test_minibatch(dmm, mini_batch, which_mini_batch, shuffled_indices):
         emission_probs_t_np = emission_probs_t.detach().numpy()
         sequence_output.append(emission_probs_t_np)
 
-        # # the next statement instructs pyro to observe x_t according to the
-        # # bernoulli distribution p(x_t|z_t)
-        # pyro.sample("obs_x_%d" % t,
-        #             # dist.Bernoulli(emission_probs_t)
-        #             dist.Normal(emission_probs_t, 0.5)
-        #             .mask(mini_batch_mask[:, t - 1:t])
-        #             .to_event(1),
-        #             obs=mini_batch[:, t - 1, :])
-
         # the latent sampled at this time step will be conditioned upon
         # in the next time step so keep track of it
         z_prev = z_t
@@ -565,10 +442,72 @@ def test_minibatch(dmm, mini_batch, which_mini_batch, shuffled_indices):
         axes[i].plot(range(len(output)), output)
         axes[i].grid()
 
-    # plt.plot(sequence_output[0, :])
-    # plt.show()
-
     return fig
+
+
+def minibatch_inference(dmm, mini_batch):
+    """
+    Runs the inference network for the mini-batch, returning a tensor of the z_t latents.
+    """
+    # Generate data that we can feed into the below fn.
+    test_data_sequences = mini_batch.type(torch.FloatTensor)
+    mini_batch_indices = torch.arange(0, test_data_sequences.size(0))
+    test_seq_lengths = torch.full((test_data_sequences.size(0),), test_data_sequences.size(1)).type(
+        torch.IntTensor)
+
+    # grab a fully prepped mini-batch using the helper function in the data loader
+    mini_batch, mini_batch_reversed, mini_batch_mask, mini_batch_seq_lengths \
+        = poly.get_mini_batch(mini_batch_indices, test_data_sequences,
+                              test_seq_lengths, cuda=args.cuda)
+
+    # Get the initial RNN state.
+    h_0 = dmm.h_0
+    h_0_contig = h_0.expand(1, mini_batch.size(0), dmm.rnn.hidden_size).contiguous()
+
+    # Feed the test sequence into the RNN.
+    rnn_output, rnn_hidden_state = dmm.rnn(mini_batch_reversed, h_0_contig)
+
+    # Reverse the time ordering of the hidden state and unpack it.
+    rnn_output = poly.pad_and_reverse(rnn_output, mini_batch_seq_lengths)
+    # print(rnn_output)
+    # print(rnn_output.shape)
+
+    # set z_prev = z_q_0 to setup the recursive conditioning in q(z_t |...)
+    z_prev = dmm.z_q_0.expand(mini_batch.size(0), dmm.z_q_0.size(0))
+
+    # sample the latents z one time step at a time
+    T_max = mini_batch.size(1)
+    sequence_output = []
+    z_t_sequence = []
+    for t in range(1, T_max + 1):
+        # the next two lines assemble the distribution q(z_t | z_{t-1}, x_{t:T})
+        z_loc, z_scale = dmm.combiner(z_prev, rnn_output[:, t - 1, :])
+
+        # if we are using normalizing flows, we apply the sequence of transformations
+        # parameterized by self.iafs to the base distribution defined in the previous line
+        # to yield a transformed distribution that we use for q(z_t|...)
+        if len(dmm.iafs) > 0:
+            z_dist = TransformedDistribution(dist.Normal(z_loc, z_scale), dmm.iafs)
+        else:
+            z_dist = dist.Normal(z_loc, z_scale)
+        assert z_dist.event_shape == ()
+        assert z_dist.batch_shape == (len(mini_batch), dmm.z_q_0.size(0))
+
+        # sample z_t from the distribution z_dist
+        annealing_factor = 1.0
+        with pyro.poutine.scale(scale=annealing_factor):
+            z_t = pyro.sample("z_%d" % t,
+                              z_dist.mask(mini_batch_mask[:, t - 1:t])
+                              .to_event(1))
+
+        # Add extra dimension that we can cancatenate over.
+        z_t = z_t.unsqueeze(1)
+        z_t_sequence.append(z_t)
+
+    z_t_sequence = torch.cat(z_t_sequence, dim=1)
+
+    return z_t_sequence
+
 
 # helper function for doing evaluation
 def do_evaluation():
@@ -585,85 +524,67 @@ def do_evaluation():
     dmm.rnn.train()
     return val_nll, test_nll
 
+
+def run_tsne(dmm, dataloader):
+    # Determine the latent variables for all mini-batches.
+    # Only keep the latent for the final time step.
+    dmm.eval()
+    all_z_latents = []
+    for test_batch in dataloader:
+        z_latents = minibatch_inference(dmm, test_batch)
+        all_z_latents.append(z_latents[:, -1, :])
+    all_latents = torch.cat(all_z_latents, dim=0)
+
+    # Run t-SNE with 2 output dimensions.
+    from sklearn.manifold import TSNE
+    model_tsne = TSNE(n_components=2, random_state=0)
+    z_states = all_latents.detach().cpu().numpy()
+    z_embed = model_tsne.fit_transform(z_states)
+    # Plot t-SNE embedding.
+    fig = plt.figure()
+    plt.scatter(z_embed[:, 0], z_embed[:, 1], s=10)
+
+    return fig, model_tsne, z_embed
+
+
+def find_nearest_vectors(query_vector, vectors, n_nearest):
+
+    pass
+
+
 # setup, training, and evaluation
 def main(args):
     # setup logging
     log = get_logger(args.log)
     log(args)
 
-    # if 0:
-    #     data = generate_sine_wave_data()
-    #     input_dim = 1
-    # elif 1:
-    #     data = generate_returns_data()
-    #     input_dim = 1
-    #     # return
-    # else:
-    #     data = poly.load_data(poly.JSB_CHORALES)
-    #     input_dim = 88
-    # training_seq_lengths = data['train']['sequence_lengths']
-    # training_data_sequences = data['train']['sequences']
-    # test_seq_lengths = data['test']['sequence_lengths']
-    # test_data_sequences = data['test']['sequences']
-    # val_seq_lengths = data['valid']['sequence_lengths']
-    # val_data_sequences = data['valid']['sequences']
-    # N_train_data = len(training_seq_lengths)
-    # N_train_time_slices = float(torch.sum(training_seq_lengths))
-    # N_mini_batches = int(N_train_data / args.mini_batch_size +
-    #                      int(N_train_data % args.mini_batch_size > 0))
-    #
-    # N_test_data = len(test_seq_lengths)
+    root_dir = r'D:\projects\trading\mlbootcamp\tickers'
+    series_length = 60
+    lookback = 50#160
+    input_dim = 1
+    train_start_date = datetime.date(2010, 1, 1)
+    train_end_date = datetime.date(2016, 1, 1)
+    test_start_date = train_end_date
+    test_end_date = datetime.date(2019, 1, 1)
+    min_sequence_length_train = 2 * (series_length + lookback)
+    min_sequence_length_test = 2 * (series_length + lookback)
 
-    if 1:
-        from dataset import create_ticker_dataset
-        root_dir = r'D:\projects\trading\mlbootcamp\tickers'
-        series_length = 60
-        lookback = 50#160
-        input_dim = 1
-        train_start_date = datetime.date(2010, 1, 1)
-        train_end_date = datetime.date(2016, 1, 1)
-        test_start_date = train_end_date
-        test_end_date = datetime.date(2019, 1, 1)
-        min_sequence_length_train = 2 * (series_length + lookback)
-        min_sequence_length_test = (series_length + lookback)
+    dataset_train = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length_train, start_date=train_start_date, end_date=train_end_date)
+    dataset_test = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length_test, start_date=test_start_date, end_date=test_end_date)
+    dataloader_train = DataLoader(dataset_train, batch_size=args.mini_batch_size, shuffle=True, num_workers=0, drop_last=True)
+    dataloader_test = DataLoader(dataset_test, batch_size=args.mini_batch_size, shuffle=False, num_workers=0, drop_last=True)
 
-        dataset_train = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length_train, start_date=train_start_date, end_date=train_end_date)
-        dataset_test = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length_test, start_date=test_start_date, end_date=test_end_date)
-        dataloader_train = DataLoader(dataset_train, batch_size=args.mini_batch_size, shuffle=True, num_workers=0, drop_last=True)
-        dataloader_test = DataLoader(dataset_test, batch_size=args.mini_batch_size, shuffle=False, num_workers=0, drop_last=True)
-
-        N_train_data = len(dataset_train)
-        N_test_data = len(dataset_test)
-        N_mini_batches = N_train_data // args.mini_batch_size
-        N_train_time_slices = args.mini_batch_size * N_mini_batches
+    N_train_data = len(dataset_train)
+    N_test_data = len(dataset_test)
+    N_mini_batches = N_train_data // args.mini_batch_size
+    N_train_time_slices = args.mini_batch_size * N_mini_batches
 
     print(f'N_train_data: {N_train_data}, N_test_data: {N_test_data}')
-
-    # log("N_train_data: %d     avg. training seq. length: %.2f    N_mini_batches: %d" %
-    #     (N_train_data, training_seq_lengths.float().mean(), N_mini_batches))
 
     # how often we do validation/test evaluation during training
     val_test_frequency = 50
     # the number of samples we use to do the evaluation
     n_eval_samples = 1
-
-    # package repeated copies of val/test data for faster evaluation
-    # (i.e. set us up for vectorization)
-    def rep(x):
-        rep_shape = torch.Size([x.size(0) * n_eval_samples]) + x.size()[1:]
-        repeat_dims = [1] * len(x.size())
-        repeat_dims[0] = n_eval_samples
-        return x.repeat(repeat_dims).reshape(n_eval_samples, -1).transpose(1, 0).reshape(rep_shape)
-
-    # get the validation/test data ready for the dmm: pack into sequences, etc.
-    # val_seq_lengths = rep(val_seq_lengths)
-    # test_seq_lengths = rep(test_seq_lengths)
-    # val_batch, val_batch_reversed, val_batch_mask, val_seq_lengths = poly.get_mini_batch(
-    #     torch.arange(n_eval_samples * val_data_sequences.shape[0]), rep(val_data_sequences),
-    #     val_seq_lengths, cuda=args.cuda)
-    # test_batch, test_batch_reversed, test_batch_mask, test_seq_lengths = poly.get_mini_batch(
-    #     torch.arange(n_eval_samples * test_data_sequences.shape[0]), rep(test_data_sequences),
-    #     test_seq_lengths, cuda=args.cuda)
 
     # instantiate the dmm
     dmm = DMM(input_dim=input_dim, rnn_dropout_rate=args.rnn_dropout_rate, num_iafs=args.num_iafs,
@@ -679,8 +600,6 @@ def main(args):
     elbo = JitTrace_ELBO() if args.jit else Trace_ELBO()
     svi = SVI(dmm.model, dmm.guide, adam, loss=elbo)
 
-    # now we're going to define some functions we need to form the main training loop
-
     # if checkpoint files provided, load model and optimizer states from disk before we start training
     if args.load_opt != '' and args.load_model != '':
         load_checkpoint(dmm, adam, log)
@@ -691,20 +610,21 @@ def main(args):
     times = [time.time()]
     for epoch in range(args.num_epochs):
         print(f'Starting epoch {epoch}.')
-        # if specified, save model and optimizer states to disk every checkpoint_freq epochs
-        if args.checkpoint_freq > 0 and epoch > 0 and epoch % args.checkpoint_freq == 0:
-            save_checkpoint(dmm, adam, log)
-
         # accumulator for our estimate of the negative log likelihood (or rather -elbo) for this epoch
         epoch_nll = 0.0
         # prepare mini-batch subsampling indices for this epoch
         shuffled_indices = torch.randperm(N_train_data)
 
         # process each mini-batch; this is where we take gradient steps
+        dmm.train()
         for which_mini_batch in range(N_mini_batches):
             print(f'Epoch {epoch} of {args.num_epochs}, Batch {which_mini_batch} of {N_mini_batches}.')
             mini_batch = next(iter(dataloader_train))
             epoch_nll += process_minibatch(svi, epoch, mini_batch, N_mini_batches, which_mini_batch, shuffled_indices)
+
+        # if specified, save model and optimizer states to disk every checkpoint_freq epochs
+        if 1:#args.checkpoint_freq > 0 and epoch > 0 and epoch % args.checkpoint_freq == 0:
+            save_checkpoint(dmm, adam, log)
 
         # report training diagnostics
         times.append(time.time())
@@ -718,13 +638,32 @@ def main(args):
             log("[val/test epoch %04d]  %.4f  %.4f" % (epoch, val_nll, test_nll))
 
         # Testing.
-        print("Testing")
-        shuffled_indices = torch.randperm(N_test_data)
-        which_mini_batch = 0
+        print(f"Testing epoch {epoch}.")
+        dmm.eval()
         mini_batch = next(iter(dataloader_test))
-        fig = test_minibatch(dmm, mini_batch, which_mini_batch, shuffled_indices)
+        fig = test_minibatch(dmm, mini_batch)
         fig.savefig(f'test_batch_{epoch}.png')
         plt.close(fig)
+
+        if 1:
+            fig, _, _ = run_tsne(dmm, dataloader_test)
+            fig.savefig(f'tsne_{epoch}.png')
+            plt.close(fig)
+
+    print("Testing")
+    dmm.eval()
+    mini_batch = next(iter(dataloader_test))
+    fig = test_minibatch(dmm, mini_batch)
+    fig.savefig(f'test_batch.png')
+    plt.close(fig)
+
+    fig, model_tsne, z_embed = run_tsne(dmm, dataloader_test)
+    fig.savefig(f'tsne_test.png')
+    plt.close(fig)
+
+
+
+    print('Finished')
 
 
 # parse command-line arguments and execute the main method
@@ -732,7 +671,7 @@ if __name__ == '__main__':
     assert pyro.__version__.startswith('0.4.1')
 
     parser = argparse.ArgumentParser(description="parse args")
-    parser.add_argument('-n', '--num-epochs', type=int, default=5000) # 5000
+    parser.add_argument('-n', '--num-epochs', type=int, default=0) # 5000
     parser.add_argument('-lr', '--learning-rate', type=float, default=0.0003)
     parser.add_argument('-b1', '--beta1', type=float, default=0.96)
     parser.add_argument('-b2', '--beta2', type=float, default=0.999)
@@ -746,8 +685,8 @@ if __name__ == '__main__':
     parser.add_argument('-iafs', '--num-iafs', type=int, default=0)
     parser.add_argument('-id', '--iaf-dim', type=int, default=100)
     parser.add_argument('-cf', '--checkpoint-freq', type=int, default=1)
-    parser.add_argument('-lopt', '--load-opt', type=str, default='')#saved_opt.pt')
-    parser.add_argument('-lmod', '--load-model', type=str, default='')#saved_model.pt')
+    parser.add_argument('-lopt', '--load-opt', type=str, default='saved_opt_returns.pt')#saved_opt.pt')
+    parser.add_argument('-lmod', '--load-model', type=str, default='saved_model_returns.pt')#saved_model.pt')
     parser.add_argument('-sopt', '--save-opt', type=str, default='saved_opt_returns.pt')
     parser.add_argument('-smod', '--save-model', type=str, default='saved_model_returns.pt')
     parser.add_argument('--cuda', default=False, action='store_true')
