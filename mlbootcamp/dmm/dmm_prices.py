@@ -458,115 +458,6 @@ def test_minibatch(dmm, mini_batch, args, sample_z=True):
     return mini_batch, sequence_z, sequence_output#fig
 
 
-# def minibatch_latent_parameters(dmm, mini_batch):
-#     """
-#     Get the parameters of the latent variables at all time steps, for the given mini-batch.
-#     """
-#     # Generate data that we can feed into the below fn.
-#     test_data_sequences = mini_batch.type(torch.FloatTensor)
-#     mini_batch_indices = torch.arange(0, test_data_sequences.size(0))
-#     test_seq_lengths = torch.full((test_data_sequences.size(0),), test_data_sequences.size(1)).type(
-#         torch.IntTensor)
-#
-#     # grab a fully prepped mini-batch using the helper function in the data loader
-#     mini_batch, mini_batch_reversed, mini_batch_mask, mini_batch_seq_lengths \
-#         = poly.get_mini_batch(mini_batch_indices, test_data_sequences,
-#                               test_seq_lengths, cuda=args.cuda)
-#
-#     # Get the initial RNN state.
-#     h_0 = dmm.h_0
-#     h_0_contig = h_0.expand(1, mini_batch.size(0), dmm.rnn.hidden_size).contiguous()
-#
-#     # Feed the test sequence into the RNN.
-#     rnn_output, rnn_hidden_state = dmm.rnn(mini_batch_reversed, h_0_contig)
-#
-#     # Reverse the time ordering of the hidden state and unpack it.
-#     rnn_output = poly.pad_and_reverse(rnn_output, mini_batch_seq_lengths)
-#
-#     # set z_prev = z_q_0 to setup the recursive conditioning in q(z_t |...)
-#     z_prev = dmm.z_q_0.expand(mini_batch.size(0), dmm.z_q_0.size(0))
-#
-#     # Determine the latent parameters at each time step.
-#     T_max = mini_batch.size(1)
-#     z_loc_sequence = []
-#     z_scale_sequence = []
-#     for t in range(1, T_max + 1):
-#         z_loc, z_scale = dmm.combiner(z_prev, rnn_output[:, t - 1, :])
-#         z_loc_sequence.append(z_loc)
-#         z_scale_sequence.append(z_scale)
-#
-#     return z_loc, z_scale
-
-
-# def generate_sample(dmm, z_t):
-#     emission_probs_t = dmm.emitter(z_t)
-#     return emission_probs_t
-
-
-# def minibatch_inference(dmm, mini_batch):
-#     """
-#     Runs the inference network for the mini-batch, returning a tensor of the z_t latents.
-#     """
-#     # Generate data that we can feed into the below fn.
-#     test_data_sequences = mini_batch.type(torch.FloatTensor)
-#     mini_batch_indices = torch.arange(0, test_data_sequences.size(0))
-#     test_seq_lengths = torch.full((test_data_sequences.size(0),), test_data_sequences.size(1)).type(
-#         torch.IntTensor)
-#
-#     # grab a fully prepped mini-batch using the helper function in the data loader
-#     mini_batch, mini_batch_reversed, mini_batch_mask, mini_batch_seq_lengths \
-#         = poly.get_mini_batch(mini_batch_indices, test_data_sequences,
-#                               test_seq_lengths, cuda=args.cuda)
-#
-#     # Get the initial RNN state.
-#     h_0 = dmm.h_0
-#     h_0_contig = h_0.expand(1, mini_batch.size(0), dmm.rnn.hidden_size).contiguous()
-#
-#     # Feed the test sequence into the RNN.
-#     rnn_output, rnn_hidden_state = dmm.rnn(mini_batch_reversed, h_0_contig)
-#
-#     # Reverse the time ordering of the hidden state and unpack it.
-#     rnn_output = poly.pad_and_reverse(rnn_output, mini_batch_seq_lengths)
-#     # print(rnn_output)
-#     # print(rnn_output.shape)
-#
-#     # set z_prev = z_q_0 to setup the recursive conditioning in q(z_t |...)
-#     z_prev = dmm.z_q_0.expand(mini_batch.size(0), dmm.z_q_0.size(0))
-#
-#     # sample the latents z one time step at a time
-#     T_max = mini_batch.size(1)
-#     sequence_output = []
-#     z_t_sequence = []
-#     for t in range(1, T_max + 1):
-#         # the next two lines assemble the distribution q(z_t | z_{t-1}, x_{t:T})
-#         z_loc, z_scale = dmm.combiner(z_prev, rnn_output[:, t - 1, :])
-#
-#         # if we are using normalizing flows, we apply the sequence of transformations
-#         # parameterized by self.iafs to the base distribution defined in the previous line
-#         # to yield a transformed distribution that we use for q(z_t|...)
-#         if len(dmm.iafs) > 0:
-#             z_dist = TransformedDistribution(dist.Normal(z_loc, z_scale), dmm.iafs)
-#         else:
-#             z_dist = dist.Normal(z_loc, z_scale)
-#         assert z_dist.event_shape == ()
-#         assert z_dist.batch_shape == (len(mini_batch), dmm.z_q_0.size(0))
-#
-#         # sample z_t from the distribution z_dist
-#         annealing_factor = 1.0
-#         with pyro.poutine.scale(scale=annealing_factor):
-#             z_t = pyro.sample("z_%d" % t,
-#                               z_dist.mask(mini_batch_mask[:, t - 1:t])
-#                               .to_event(1))
-#
-#         # Add extra dimension that we can cancatenate over.
-#         z_t = z_t.unsqueeze(1)
-#         z_t_sequence.append(z_t)
-#
-#     z_t_sequence = torch.cat(z_t_sequence, dim=1)
-#
-#     return z_t_sequence
-
-
 # helper function for doing evaluation
 def do_evaluation():
     # put the RNN into evaluation mode (i.e. turn off drop-out if applicable)
@@ -581,29 +472,6 @@ def do_evaluation():
     # put the RNN back into training mode (i.e. turn on drop-out if applicable)
     dmm.rnn.train()
     return val_nll, test_nll
-
-
-# def run_tsne(dmm, dataloader):
-#     # Determine the latent variables for all mini-batches.
-#     # Only keep the latent for the final time step.
-#     dmm.eval()
-#     all_z_latents = []
-#     for test_batch in dataloader:
-#         # z_latents = minibatch_inference(dmm, test_batch)
-#         z_latents = encode_x_to_z(dmm, test_batch, sample_z_t=False)
-#         all_z_latents.append(z_latents[:, z_latents.shape[1]-2, :])
-#     all_latents = torch.cat(all_z_latents, dim=0)
-#
-#     # Run t-SNE with 2 output dimensions.
-#     from sklearn.manifold import TSNE
-#     model_tsne = TSNE(n_components=2, random_state=0)
-#     z_states = all_latents.detach().cpu().numpy()
-#     z_embed = model_tsne.fit_transform(z_states)
-#     # Plot t-SNE embedding.
-#     fig = plt.figure()
-#     plt.scatter(z_embed[:, 0], z_embed[:, 1], s=10)
-#
-#     return fig, model_tsne, z_embed
 
 
 # setup, training, and evaluation
@@ -699,10 +567,10 @@ def main(args):
         fig.savefig(f'test_batch_{epoch}.png')
         plt.close(fig)
 
-        if 1:
-            fig, _, _ = run_tsne(dmm, dataloader_test)
-            fig.savefig(f'tsne_{epoch}.png')
-            plt.close(fig)
+        # if 1:
+        #     fig, _, _ = run_tsne(dmm, dataloader_test)
+        #     fig.savefig(f'tsne_{epoch}.png')
+        #     plt.close(fig)
 
     print("Testing")
     if 1:
