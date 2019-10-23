@@ -137,8 +137,10 @@ def find_similar(vae, dataloader):
     x_all = []
     z_all = []
     x_reconst_all = []
-    for x in dataloader:
+    filenames_all = []
+    for batch in dataloader:
         # x, z, x_reconst = test_minibatch(dmm, test_batch, args, sample_z=True)
+        x = batch['series']
         if args.cuda:
             x = x.cuda()
         x = x.float()
@@ -151,6 +153,7 @@ def find_similar(vae, dataloader):
         x_all.append(x)
         z_all.append(z_loc)
         x_reconst_all.append(x_reconst)
+        filenames_all.extend(batch['filename'])
     x_all = np.concatenate(x_all, axis=0)
     z_all = np.concatenate(z_all, axis=0)
     x_reconst_all = np.concatenate(x_reconst_all, axis=0)
@@ -161,22 +164,27 @@ def find_similar(vae, dataloader):
     nbrs = NearestNeighbors(n_neighbors=1 + n_neighbours, algorithm='ball_tree').fit(z_all)
     distances, indices = nbrs.kneighbors(z_all)
 
-    # Select a random latent.
-    query_index = 0
-    # Skip the first closest index, since it is just the query index.
-    closest_indices = indices[query_index][1:]
+    query_indices = [0, 1]
+    query_indices = np.random.randint(0, len(filenames_all), size=10)
 
-    # Plot the query and closest series.
-    fig, axes = plt.subplots(1 + n_neighbours, 1, squeeze=False)
-    ax = axes[0, 0]
-    x_series = x_all[query_index, ...]
-    ax.plot(range(x_series.shape[0]), x_series, c='r')
-    ax.grid()
-    for i in range(n_neighbours):
-        ax = axes[i + 1, 0]
-        x_series = x_all[closest_indices[i], ...]
-        ax.plot(range(x_series.shape[0]), x_series, c='b')
+    for query_index in query_indices:
+        print(f'Query index {query_index}')
+        # Skip the first closest index, since it is just the query index.
+        closest_indices = indices[query_index][1:]
+
+        # Plot the query and closest series.
+        fig, axes = plt.subplots(1 + n_neighbours, 1, squeeze=False)
+        ax = axes[0, 0]
+        x_series = x_all[query_index, ...]
+        ax.plot(range(x_series.shape[0]), x_series, c='r')
+        ax.set_title(filenames_all[query_index])
         ax.grid()
+        for i in range(n_neighbours):
+            ax = axes[i + 1, 0]
+            x_series = x_all[closest_indices[i], ...]
+            ax.plot(range(x_series.shape[0]), x_series, c='b')
+            ax.set_title(filenames_all[closest_indices[i]])
+            ax.grid()
     plt.show()
 
     return
@@ -197,6 +205,7 @@ def main(args):
     test_end_date = datetime.date(2019, 1, 1)
     min_sequence_length_train = 2 * (series_length + lookback)
     min_sequence_length_test = 2 * (series_length + lookback)
+    max_n_files = None
 
     load_path = 'out/checkpoint_0035.pt'
 
@@ -204,9 +213,11 @@ def main(args):
     # train_loader, test_loader
     # train_loader, test_loader = setup_data_loaders(MNIST, use_cuda=args.cuda, batch_size=256)
     dataset_train = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length_train,
-                                          start_date=train_start_date, end_date=train_end_date)
+                                          start_date=train_start_date, end_date=train_end_date,
+                                          max_n_files=max_n_files)
     dataset_test = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length_test,
-                                         start_date=test_start_date, end_date=test_end_date, fixed_start_date=True)
+                                         start_date=test_start_date, end_date=test_end_date, fixed_start_date=True,
+                                         max_n_files=max_n_files)
     train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
     test_loader = DataLoader(dataset_test, batch_size=batch_size, shuffle=False, num_workers=0, drop_last=True)
 
@@ -326,7 +337,8 @@ def main(args):
         find_similar(vae, test_loader)
 
     # Visualise first batch.
-    x = next(iter(test_loader))
+    batch = next(iter(test_loader))
+    x = batch['series']
     if args.cuda:
         x = x.cuda()
     x = x.float()

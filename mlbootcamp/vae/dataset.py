@@ -10,7 +10,7 @@ from pathlib import Path
 class TickerDataset(Dataset):
 
     def __init__(self, root_dir, series_length, lookback, min_sequence_length, template='*.csv', transform=None,
-                 start_date=None, end_date=None, fixed_start_date=False, datetime_format='%Y-%m-%d'):
+                 start_date=None, end_date=None, fixed_start_date=False, datetime_format='%Y-%m-%d', max_n_files=None):
         self.series_length = series_length
         self.lookback = lookback
         self.transform = transform
@@ -21,8 +21,8 @@ class TickerDataset(Dataset):
 
         # Only keep tickers with length less than a minimum.
         ticker_files = glob.glob(str(Path(root_dir) / template))
-        if 0:
-            ticker_files = ticker_files[:100]
+        if max_n_files:
+            ticker_files = ticker_files[:max_n_files]
         self.ticker_files = []
         print(f'Finding tickers with sufficient length, from {len(ticker_files)} files.')
         for ticker_file in ticker_files:
@@ -37,9 +37,6 @@ class TickerDataset(Dataset):
                 self.ticker_files.append(ticker_file)
         print(f'Found {len(self.ticker_files)} files.')
 
-        if 0:
-            self.ticker_files = self.ticker_files[:50]
-
     def __len__(self):
         return len(self.ticker_files)
 
@@ -47,14 +44,15 @@ class TickerDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        df = self._read_csv(self.ticker_files[idx])
+        filename = self.ticker_files[idx]
+        df = self._read_csv(filename)
 
         # Calculate a rolling z-score.
         df['returns'] = df['close'].pct_change()
         df['returns'] = (df['returns'] - df['returns'].rolling(self.lookback).mean()) / df['returns'].rolling(self.lookback).std()
         df = df.dropna()
 
-        # Filter dates after calculating returns, so previous dates can be used in the lookback.
+        # Filter dates *after* calculating returns, so previous dates can be used in the lookback.
         if self.start_date:
             df = df.loc[self.start_date:]
         if self.end_date:
@@ -74,7 +72,16 @@ class TickerDataset(Dataset):
         # Convert to torch tensor.
         series = torch.from_numpy(series)
 
-        return series
+        dates = df.index.values[start: start + self.series_length]
+        dates = [str(d) for d in dates]
+
+        sample = {
+            'series': series,
+            'filename': filename,
+            'dates': dates,
+        }
+
+        return sample
 
     def _read_csv(self, filename):
         df = pd.read_csv(filename)
@@ -84,9 +91,10 @@ class TickerDataset(Dataset):
 
 
 def create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length,
-                          start_date=None, end_date=None, fixed_start_date=False):
+                          start_date=None, end_date=None, fixed_start_date=False, max_n_files=None):
     dataset = TickerDataset(root_dir, series_length, lookback, min_sequence_length,
-                            start_date=start_date, end_date=end_date, fixed_start_date=fixed_start_date)
+                            start_date=start_date, end_date=end_date, fixed_start_date=fixed_start_date,
+                            max_n_files=max_n_files)
     return dataset
 
 
@@ -94,12 +102,17 @@ def test_ticker_dataset():
     root_dir = r'D:\projects\trading\mlbootcamp\tickers'
     series_length = 200
     lookback = 200
+    min_sequence_length = 2 * (series_length + lookback)
+    max_n_files = 100
 
-    dataset = create_ticker_dataset(root_dir, series_length, lookback)
+    dataset = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length, max_n_files=max_n_files)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=0)
 
     for b, batch in enumerate(dataloader):
-        print(b, batch.shape)
+        series = batch['series']
+        filename = batch['filename']
+        dates = batch['dates']
+        print(b, series.shape, filename, dates)
 
 
 def main():
