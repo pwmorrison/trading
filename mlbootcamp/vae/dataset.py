@@ -5,12 +5,14 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import glob
 from pathlib import Path
+import os
 
 
 class TickerDataset(Dataset):
 
     def __init__(self, root_dir, series_length, lookback, min_sequence_length, template='*.csv', transform=None,
-                 start_date=None, end_date=None, fixed_start_date=False, datetime_format='%Y-%m-%d', max_n_files=None):
+                 start_date=None, end_date=None, fixed_start_date=False, datetime_format='%Y-%m-%d',
+                 normalised_returns=False, max_n_files=None):
         self.series_length = series_length
         self.lookback = lookback
         self.transform = transform
@@ -18,6 +20,7 @@ class TickerDataset(Dataset):
         self.end_date = end_date
         self.datetime_format = datetime_format
         self.fixed_start_date = fixed_start_date
+        self.normalised_returns = normalised_returns
 
         # Only keep tickers with length less than a minimum.
         ticker_files = glob.glob(str(Path(root_dir) / template))
@@ -26,7 +29,45 @@ class TickerDataset(Dataset):
         self.ticker_files = []
         print(f'Finding tickers with sufficient length, from {len(ticker_files)} files.')
         for ticker_file in ticker_files:
-            df = self._read_csv(ticker_file)
+
+            if 0:
+                if os.path.basename(ticker_file) != 'MS_prices.csv':
+                    continue
+
+            df = read_csv(ticker_file, self.datetime_format)
+
+            # Identify the indices within the given date range.
+            if start_date and end_date:
+                valid_indices = ((df.index >= start_date) & (df.index <= end_date))
+            elif start_date:
+                valid_indices = df.index >= start_date
+            elif end_date:
+                valid_indices = df.index <= end_date
+            else:
+                assert False
+
+            if sum(valid_indices) == 0:
+                # No days in the given date range.
+                continue
+
+            # Get the indicies of the valid days in the date range.
+            valid_indices = np.where(valid_indices)[0]
+
+            if valid_indices[0] < lookback:
+                # Not enough days before the start date to compute returns.
+                continue
+
+            if len(valid_indices) < series_length:
+                # Not enough days between the start and end date.
+                continue
+
+            self.ticker_files.append(ticker_file)
+            continue
+
+            # start_date_index = np.
+
+            # Get the index of the start date.
+            start_date_row = df.index.get_loc(self.start_date)
 
             if self.start_date:
                 df = df.loc[self.start_date:]
@@ -45,11 +86,18 @@ class TickerDataset(Dataset):
             idx = idx.tolist()
 
         filename = self.ticker_files[idx]
-        df = self._read_csv(filename)
+        df = read_csv(filename, self.datetime_format)
 
         # Calculate a rolling z-score.
         df['returns'] = df['close'].pct_change()
-        df['returns'] = (df['returns'] - df['returns'].rolling(self.lookback).mean()) / df['returns'].rolling(self.lookback).std()
+        if self.normalised_returns:
+            # Normalised returns.
+            df['returns'] = (df['returns'] - df['returns'].rolling(self.lookback).mean()) / df['returns'].rolling(self.lookback).std()
+
+        if 0:
+            # Return close prices.
+            df['returns'] = df['close']
+
         df = df.dropna()
 
         # Filter dates *after* calculating returns, so previous dates can be used in the lookback.
@@ -83,18 +131,20 @@ class TickerDataset(Dataset):
 
         return sample
 
-    def _read_csv(self, filename):
-        df = pd.read_csv(filename)
-        df['date'] = pd.to_datetime(df['date'], format=self.datetime_format)
-        df.set_index('date', inplace=True)
-        return df
+
+def read_csv(filename, datetime_format):
+    df = pd.read_csv(filename)
+    df['date'] = pd.to_datetime(df['date'], format=datetime_format)
+    df.set_index('date', inplace=True)
+    return df
 
 
 def create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length,
-                          start_date=None, end_date=None, fixed_start_date=False, max_n_files=None):
+                          start_date=None, end_date=None, fixed_start_date=False,
+                          normalised_returns=False, max_n_files=None):
     dataset = TickerDataset(root_dir, series_length, lookback, min_sequence_length,
                             start_date=start_date, end_date=end_date, fixed_start_date=fixed_start_date,
-                            max_n_files=max_n_files)
+                            normalised_returns=normalised_returns, max_n_files=max_n_files)
     return dataset
 
 

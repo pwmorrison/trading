@@ -8,6 +8,7 @@ from glob import glob
 import os
 import subprocess
 import pandas as pd
+import scipy.stats as stats
 import shutil
 import torch
 import torch.nn as nn
@@ -361,6 +362,92 @@ def trade_pairs(pairs_indices, tickers_all, start_date, end_date, out_dir,
     return backtest_results
 
 
+def trade_pairs_bulk(pairs_indices, tickers_all, start_date, end_date, out_dir,
+                r_script_exe, r_script, backtest_sd, trade_returns_file, trade_plot_file):
+
+    # Write the selected pairs out to a file.
+    pairs_filename = out_dir / 'vae_pairs_trade.csv'
+    pairs_file = open(pairs_filename, 'w')
+    trade_returns_files = []
+    for pair in pairs_indices:
+        ticker_1 = tickers_all[pair[0]]
+        ticker_2 = tickers_all[pair[1]]
+        returns_filename = str(out_dir / f'trade_returns_{ticker_1}-{ticker_2}.csv').replace(os.sep, os.altsep)
+        plot_filename = str(out_dir / f'trade_plot_{ticker_1}-{ticker_2}.png').replace(os.sep, os.altsep)
+        pairs_file.write(f'{ticker_1},{ticker_2},{returns_filename},{plot_filename}\n')
+        trade_returns_files.append(returns_filename)
+    pairs_file.close()
+
+    # Run the trades in one call to the R script.
+    command = [
+        r_script_exe,
+        r_script,
+        str(pairs_filename),
+        start_date.strftime("%Y-%m-%d"),
+        end_date.strftime("%Y-%m-%d"),
+        str(backtest_sd)]
+    print(f'Running trade backtest with command: {command}')
+    subprocess.call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Get the returns results.
+    results = []
+    backtest_results = {}
+    for i, backtest_returns_file in enumerate(trade_returns_files):
+        backtest_results_df = pd.read_csv(backtest_returns_file)
+        backtest_return = backtest_results_df.iloc[0][1]
+        backtest_stddev = backtest_results_df.iloc[1][1]
+        backtest_sharpe = backtest_results_df.iloc[2][1]
+        results.append(backtest_sharpe)
+
+        pair = pairs_indices[i]
+        backtest_results[tuple(pair)] = [backtest_return, backtest_stddev, backtest_sharpe]
+
+
+    # # The backtest result for each pair.
+    # backtest_results = {}
+    # for pair_ind, pair in enumerate(pairs_indices):
+    #     # print(tickers_all[pair[0]], tickers_all[pair[1]])
+    #
+    #     ticker_1 = tickers_all[pair[0]]
+    #     ticker_2 = tickers_all[pair[1]]
+    #     backtest_start_date = start_date
+    #     backtest_end_date = end_date
+    #
+    #     # Run a backtest.
+    #     backtest_command = [
+    #         r_script_exe,
+    #         r_script,
+    #         ticker_1,
+    #         ticker_2,
+    #         backtest_start_date.strftime("%Y-%m-%d"),
+    #         backtest_end_date.strftime("%Y-%m-%d"),
+    #         str(backtest_sd),
+    #         trade_returns_file,
+    #         trade_plot_file]
+    #     print(f'Running trading backtest with command: {backtest_command}')
+    #     subprocess.call(backtest_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    #
+    #     # Get the results.
+    #     backtest_results_df = pd.read_csv(trade_returns_file)
+    #     backtest_return = backtest_results_df.iloc[0][1]
+    #     backtest_stddev = backtest_results_df.iloc[1][1]
+    #     backtest_sharpe = backtest_results_df.iloc[2][1]
+    #     # print(backtest_results_df)
+    #
+    #     # Copy the backtest files so they don't get overwritten.
+    #     new_backtest_returns_file = os.path.splitext(os.path.basename(trade_returns_file))[0]
+    #     new_backtest_returns_file = Path(out_dir) / (str(new_backtest_returns_file) + f'_{ticker_1}-{ticker_2}.csv')
+    #     shutil.copy(trade_returns_file, new_backtest_returns_file)
+    #
+    #     new_backtest_plot_file = os.path.splitext(os.path.basename(trade_plot_file))[0]
+    #     new_backtest_plot_file = Path(out_dir) / (str(new_backtest_plot_file) + f'_{ticker_1}-{ticker_2}.jpeg')
+    #     shutil.copy(trade_plot_file, new_backtest_plot_file)
+    #
+    #     backtest_results[tuple(pair)] = backtest_sharpe
+
+    return backtest_results
+
+
 def run_walk_forward(start_date, end_date, n_lookback_days, n_trade_days, n_pairs_vae, n_pairs_backtest,
                      returns_lookback, vae, ticker_files, out_dir,
                      r_script_exe, r_backtest_script, r_trade_script, backtest_sd,
@@ -372,6 +459,7 @@ def run_walk_forward(start_date, end_date, n_lookback_days, n_trade_days, n_pair
     current_date = start_date
 
     # Loop over walk forward periods.
+    trade_sharpes = []
     while True:
         print(f'Starting walk-forward at date {current_date}')
 
@@ -455,10 +543,23 @@ def run_walk_forward(start_date, end_date, n_lookback_days, n_trade_days, n_pair
         # "Trade" the selected stocks over the next period.
         trade_end_date = current_date + timedelta(int(n_trade_days * 7 / 5))  # Assume 5 trade days per week.
         print(f'Trading {len(pairs_indices_backtest)} pairs from {current_date} to {trade_end_date}')
-        trade_results = trade_pairs(
+        trade_results = trade_pairs_bulk(
             pairs_indices_backtest, tickers_all, current_date, current_date + timedelta(3*365/12), current_out_dir,
             r_script_exe, r_trade_script, backtest_sd, trade_returns_file, trade_plot_file)
         print(f'Results of trade at date {current_date}: {trade_results}')
+
+        sharpes = [trade_results[pair][2] for pair in trade_results]
+        trade_sharpes.extend(sharpes)
+        fig, axes = plt.subplots(1, 1, squeeze=False)
+        ax = axes[0, 0]
+        ax.hist(trade_sharpes)
+        mu = np.mean(trade_sharpes)
+        sd = np.std(trade_sharpes)
+        x = np.linspace(min(trade_sharpes), max(trade_sharpes), 100)
+        ax2 = ax.twinx()
+        ax2.plot(x, stats.norm.pdf(x, mu, sd), c='r')
+        plt.savefig(current_out_dir / 'sharpes_current.png')
+        plt.close(fig)
 
         # Move forward to the next period
         current_date = trade_end_date
@@ -499,10 +600,9 @@ def test():
         vae.load_state_dict(checkpoint['model_state_dict'])
 
     ticker_files = glob(str(Path(c['in_dir']) / '*.csv'))
-    print(ticker_files)
-
-    if 1:
+    if 0:
         ticker_files = ticker_files[:10]
+    print(f'Found {len(ticker_files)} ticker files.')
 
     run_walk_forward(
         start_date=start_date,

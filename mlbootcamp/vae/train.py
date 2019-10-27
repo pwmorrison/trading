@@ -51,10 +51,10 @@ def train():
 
     dataset_train = create_ticker_dataset(c['in_dir'], c['series_length'], lookback, min_sequence_length_train,
                                           start_date=train_start_date, end_date=train_end_date,
-                                          max_n_files=max_n_files)
+                                          normalised_returns=c['normalised_returns'], max_n_files=max_n_files)
     dataset_val = create_ticker_dataset(c['in_dir'], c['series_length'], lookback, min_sequence_length_test,
-                                         start_date=val_start_date, end_date=val_end_date, fixed_start_date=True,
-                                         max_n_files=max_n_files)
+                                        start_date=val_start_date, end_date=val_end_date, fixed_start_date=True,
+                                        normalised_returns=c['normalised_returns'], max_n_files=max_n_files)
     train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=0, drop_last=True)
     val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=0, drop_last=True)
 
@@ -66,7 +66,7 @@ def train():
     print(f'N_train_data: {N_train_data}, N_val_data: {N_val_data}')
 
     # setup the VAE
-    vae = VAE(c['series_length'], use_cuda=c['cuda'])
+    vae = VAE(c['series_length'], z_dim=c['z_dim'], use_cuda=c['cuda'])
 
     # setup the optimizer
     adam_args = {"lr": c['learning_rate']}

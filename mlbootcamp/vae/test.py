@@ -43,6 +43,7 @@ def find_similar(vae, dataloader, cuda):
     z_all = np.concatenate(z_all, axis=0)
     x_reconst_all = np.concatenate(x_reconst_all, axis=0)
 
+
     # Get the closest latent to the query.
     n_neighbours = 5
     from sklearn.neighbors import NearestNeighbors
@@ -92,19 +93,19 @@ def test():
     lookback = 50  # 160
     input_dim = 1
 
-    test_start_date = datetime.strptime(c['test_start_date'], '%Y/%m/%d')
-    test_end_date = datetime.strptime(c['test_end_date'], '%Y/%m/%d')
+    test_start_date = datetime.strptime(c['test_start_date'], '%Y/%m/%d') if c['test_start_date'] else None
+    test_end_date = datetime.strptime(c['test_end_date'], '%Y/%m/%d') if c['test_end_date'] else None
     min_sequence_length_test = 2 * (c['series_length'] + lookback)
     max_n_files = None
 
     out_path = Path(c['out_dir'])
     out_path.mkdir(exist_ok=True)
 
-    load_path = 'out_saved/checkpoint_0035.pt'
+    # load_path = 'out_saved/checkpoint_0035.pt'
 
     dataset_test = create_ticker_dataset(c['in_dir'], c['series_length'], lookback, min_sequence_length_test,
                                          start_date=test_start_date, end_date=test_end_date, fixed_start_date=True,
-                                         max_n_files=max_n_files)
+                                         normalised_returns=c['normalised_returns'], max_n_files=max_n_files)
     test_loader = DataLoader(dataset_test, batch_size=c['batch_size'], shuffle=False, num_workers=0, drop_last=True)
 
     # N_train_data = len(dataset_train)
@@ -115,7 +116,7 @@ def test():
     print(f'N_test_data: {N_test_data}')
 
     # setup the VAE
-    vae = VAE(c['series_length'], use_cuda=c['cuda'])
+    vae = VAE(c['series_length'], z_dim=c['z_dim'], use_cuda=c['cuda'])
 
     # setup the optimizer
     # adam_args = {"lr": args.learning_rate}
@@ -125,8 +126,8 @@ def test():
     # elbo = JitTrace_ELBO() if args.jit else Trace_ELBO()
     # svi = SVI(vae.model, vae.guide, optimizer, loss=elbo)
 
-    if load_path:
-        checkpoint = torch.load(load_path)
+    if c['checkpoint_load']:
+        checkpoint = torch.load(c['checkpoint_load'])
         vae.load_state_dict(checkpoint['model_state_dict'])
         # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
