@@ -320,6 +320,106 @@ def get_returns_series(ticker_files, current_date, n_days, rolling_lookback, dat
     return x_all, x_mean_all, x_std_all, filenames_all, lookback_start_dates
 
 
+def plot_vae_selections(pairs_vae, pairs_distances_vae, x_all, x_mean_all, x_std_all, fundamentals_df, out_dir):
+
+    for pair_ind, pair in enumerate(pairs_vae):
+        ticker_1 = pair[0]
+        ticker_2 = pair[1]
+        distance = pairs_distances_vae[tuple(pair)]
+        sector_1, industry_1 = get_sector_and_industry(fundamentals_df, ticker_1)
+
+        # Get the average mean and std. dev. of each sequence, to see if it says anything interesting.
+        ticker_1_mean = np.mean(x_mean_all[ticker_1])
+        ticker_2_mean = np.mean(x_mean_all[ticker_2])
+        ticker_1_std = np.mean(x_std_all[ticker_1])
+        ticker_2_std = np.mean(x_std_all[ticker_2])
+
+        fig, axes = plt.subplots(1, 1, squeeze=False)
+        plt.subplots_adjust(top=0.7)
+        # fig.suptitle(f'{ticker_1} - {ticker_2}: {sector_1} ({industry_1})\n')
+        ax = axes[0, 0]
+        ax.plot(x_all[pair[0]], label=ticker_1)
+        ax.plot(x_all[pair[1]], label=ticker_2)
+        ax.legend(loc='upper left')
+        ax.set_title(f'{ticker_1} - {ticker_2}: {sector_1} ({industry_1})\n'
+                     f'{ticker_1} returns mean {ticker_1_mean:.4f}, std. dev. {ticker_1_std:.4f}\n'
+                     f'{ticker_2} returns mean {ticker_2_mean:.4f}, std. dev. {ticker_2_std:.4f}\n'
+                     f'VAE distance {distance:.4f}'
+                     , pad=10)
+
+        plt.savefig(out_dir / f'vae_selection_{ticker_1}-{ticker_2}.png')
+        plt.close(fig)
+
+
+def output_spreads(pairs_vae, filenames_all, current_date, n_backtest_days, returns_lookback, backtest_results, trade_results, backtest_results_file, out_dir, datetime_format):
+    # Plot the rolling mean of the spread, for each pair that we backtested.
+    # This is for generating features and targets for a supervised "profitability" predictor.
+    # This requires the traded pairs to be the same as the backtested pairs (in config file).
+    for pair_ind, pair in enumerate(pairs_vae):
+        ticker_1, ticker_2 = pair[0], pair[1]
+        filename_1 = filenames_all[ticker_1]
+        filename_2 = filenames_all[ticker_2]
+
+        df_1 = read_csv(filename_1, datetime_format)
+        df_1 = df_1.loc[:current_date]
+        df_1 = df_1.iloc[-(returns_lookback + n_backtest_days):]
+
+        df_2 = read_csv(filename_2, datetime_format)
+        df_2 = df_2.loc[:current_date]
+        df_2 = df_2.iloc[-(returns_lookback + n_backtest_days):]
+
+        # The spread between the two tickers.
+        df_1['spread'] = df_1['close'] / df_2['close']
+
+        # The rolling mean and std dev. of the spread.
+        df_1['spread_mean'] = df_1['spread'].rolling(20).mean()
+        df_1['spread_std'] = df_1['spread'].rolling(20).std()
+
+        # Normalise the mean and std. dev.
+        df_1['spread_norm'] = (df_1['spread'] - df_1['spread'].mean()) / df_1['spread'].std()
+        df_1['spread_norm_mean'] = df_1['spread_norm'].rolling(20).mean()
+        df_1['spread_norm_std'] = df_1['spread_norm'].rolling(20).std()
+        # df_1['spread_mean_norm'] = (df_1['spread_mean'] - df_1['spread_mean'].mean()) / df_1['spread_mean'].std()
+        # df_1['spread_std_norm'] = (df_1['spread_std'] - df_1['spread_std'].mean()) / df_1['spread_std'].std()
+
+        # backtest_sharpe = backtest_sharpes[pair_ind]
+        backtest_sharpe = backtest_results[(pair[0], pair[1])][2]
+        backtest_profitable = 1 if backtest_sharpe > 0 else 0
+
+        print(pair)
+        trade_sharpe = trade_results[(pair[0], pair[1])][2]
+        trade_profitable = 1 if trade_sharpe > 0 else 0
+
+        fig, axes = plt.subplots(2, 1, squeeze=False)
+        ax = axes[0, 0]
+        ax.plot(df_1['spread'], c='blue')
+        ax.plot(df_1['spread_mean'], c='orange')
+        ax.plot(df_1['spread_mean'] + 2 * df_1['spread_std'], c='green')
+        ax.plot(df_1['spread_mean'] - 2 * df_1['spread_std'], c='green')
+        ax.grid()
+        ax.set_title(f'Sharpe {backtest_sharpe}')
+        ax = axes[1, 0]
+        ax.plot(df_1['spread_norm'], c='blue')
+        ax.plot(df_1['spread_norm_mean'], c='orange')
+        ax.plot(df_1['spread_norm_mean'] + 2 * df_1['spread_norm_std'], c='green')
+        ax.plot(df_1['spread_norm_mean'] - 2 * df_1['spread_norm_std'], c='green')
+        ax.grid()
+        plt.savefig(out_dir / f'backtest_spread_{ticker_1}-{ticker_2}.png')
+        plt.close(fig)
+
+        df_1 = df_1.dropna()
+        results_str = f'{current_date}, {ticker_1}, {ticker_2}, '
+        spread_norm_means = list(df_1['spread_norm_mean'])
+        spread_norm_stds = list(df_1['spread_norm_std'])
+        for spread_mean in spread_norm_means:
+            results_str += f'{spread_mean}, '
+        for spread_std in spread_norm_stds:
+            results_str += f'{spread_std}, '
+        results_str += f'{backtest_sharpe}, {backtest_profitable}, {trade_sharpe}, {trade_profitable}'
+        backtest_results_file.write(f'{results_str}\n')
+        backtest_results_file.flush()
+
+
 def run_walk_forward(start_date, end_date,
                      n_lookback_days, n_backtest_days, n_trade_days,
                      n_pairs_vae, n_pairs_backtest,
@@ -349,52 +449,20 @@ def run_walk_forward(start_date, end_date,
         x_all, x_mean_all, x_std_all, filenames_all, lookback_start_dates = get_returns_series(
             ticker_files, vae_date, n_lookback_days, returns_lookback, datetime_format)
 
-        # Filter using the VAE.
+        # Select pairs using the VAE.
         pairs_vae, pairs_distances_vae = select_pairs_vae(x_all, vae, n_pairs_vae, fundamentals_df, cuda)
         print(f'Selected {len(pairs_vae)} pairs using VAE.')
-        pairs_vae_stddev_diff = {}
-        if 1:
-            # Plot the pairs we selected.
-            n = min(9999999999999999, n_pairs_vae)
-            for pair_ind, pair in enumerate(pairs_vae[:n]):
-                ticker_1 = pair[0]
-                ticker_2 = pair[1]
-                distance = pairs_distances_vae[tuple(pair)]
-                sector_1, industry_1 = get_sector_and_industry(fundamentals_df, ticker_1)
 
-                # Get the average mean and std. dev. of each sequence, to see if it says anything interesting.
-                ticker_1_mean = np.mean(x_mean_all[ticker_1])
-                ticker_2_mean = np.mean(x_mean_all[ticker_2])
-                ticker_1_std = np.mean(x_std_all[ticker_1])
-                ticker_2_std = np.mean(x_std_all[ticker_2])
-                pairs_vae_stddev_diff[(ticker_1, ticker_2)] = abs(ticker_1_std - ticker_2_std)
+        # Plot the pairs we selected.
+        plot_vae_selections(pairs_vae, pairs_distances_vae, x_all, x_mean_all, x_std_all, fundamentals_df, current_out_dir)
 
-                fig, axes = plt.subplots(1, 1, squeeze=False)
-                plt.subplots_adjust(top=0.7)
-                # fig.suptitle(f'{ticker_1} - {ticker_2}: {sector_1} ({industry_1})\n')
-                ax = axes[0, 0]
-                ax.plot(x_all[pair[0]], label=ticker_1)
-                ax.plot(x_all[pair[1]], label=ticker_2)
-                ax.legend(loc='upper left')
-                ax.set_title(f'{ticker_1} - {ticker_2}: {sector_1} ({industry_1})\n'
-                             f'{ticker_1} returns mean {ticker_1_mean:.4f}, std. dev. {ticker_1_std:.4f}\n'
-                             f'{ticker_2} returns mean {ticker_2_mean:.4f}, std. dev. {ticker_2_std:.4f}\n'
-                             f'VAE distance {distance:.4f}'
-                             , pad=10)
-
-                plt.savefig(current_out_dir / f'vae_selection_{ticker_1}-{ticker_2}.png')
-                plt.close(fig)
-
-        # Filter using a backtest.
+        # Run backtests on the pairs selected using the VAE.
         backtest_start_date = current_date - timedelta(int(n_backtest_days * 7. / 5))  # Assume 5 trade days per week.
         backtest_results = backtest_pairs_bulk(
             pairs_vae, backtest_start_date, current_date, current_out_dir,
             r_script_exe, r_backtest_script, backtest_sd)
 
         # Plot the backtest results.
-        # returns = [backtest_results[pair][0] for pair in backtest_results if not np.isnan(backtest_results[pair][0])]
-        # sds = [backtest_results[pair][1] for pair in backtest_results if not np.isnan(backtest_results[pair][1])]
-        # sharpes = [backtest_results[pair][2] for pair in backtest_results if not np.isnan(backtest_results[pair][2])]
         fig, axes = plot_backtest_results(backtest_results, hist=False)
         plt.savefig(current_out_dir / 'backtest_results.png')
         plt.close(fig)
@@ -403,88 +471,23 @@ def run_walk_forward(start_date, end_date,
         pairs_backtest = select_pairs(backtest_results, pairs_vae, n_pairs_backtest)
         print(f'Selected {len(pairs_backtest)} pairs using backtest.')
 
+        # "Trade" the selected stocks over the next period.
         trade_end_date = current_date + timedelta(int(n_trade_days * 7. / 5))  # Assume 5 trade days per week.
-        if 1:
-            # "Trade" the selected stocks over the next period.
-            print(f'Trading {len(pairs_backtest)} pairs from {current_date} to {trade_end_date}')
-            trade_results = trade_pairs_bulk(pairs_backtest, current_date, trade_end_date, current_out_dir,
-                                             r_script_exe, r_trade_script, backtest_sd)
-            print(f'Results of trade at date {current_date}: {trade_results}')
+        print(f'Trading {len(pairs_backtest)} pairs from {current_date} to {trade_end_date}')
+        trade_results = trade_pairs_bulk(pairs_backtest, current_date, trade_end_date, current_out_dir,
+                                         r_script_exe, r_trade_script, backtest_sd)
 
-            # returns = [trade_results[pair][0] for pair in trade_results if not np.isnan(trade_results[pair][0])]
-            # sds = [trade_results[pair][1] for pair in trade_results if not np.isnan(trade_results[pair][1])]
-            # sharpes = [trade_results[pair][2] for pair in trade_results if not np.isnan(trade_results[pair][2])]
-            fig, axes = plot_backtest_results(trade_results, hist=False)
-            plt.savefig(current_out_dir / 'trade_results.png')
-            plt.close(fig)
+        # Plot the trade results.
+        fig, axes = plot_backtest_results(trade_results, hist=False)
+        plt.savefig(current_out_dir / 'trade_results.png')
+        plt.close(fig)
 
         if 0:
             # Plot the rolling mean of the spread, for each pair that we backtested.
             # This is for generating features and targets for a supervised "profitability" predictor.
             # This requires the traded pairs to be the same as the backtested pairs (in config file).
-            for pair_ind, pair in enumerate(pairs_indices_vae):
-                filename_1 = filenames_all[pair[0]]
-                filename_2 = filenames_all[pair[1]]
-                ticker_1 = tickers_all[pair[0]]
-                ticker_2 = tickers_all[pair[1]]
-
-                df_1 = read_csv(filename_1, datetime_format)
-                df_1 = df_1.loc[:current_date]
-                df_1 = df_1.iloc[-(returns_lookback + n_backtest_days):]
-
-                df_2 = read_csv(filename_2, datetime_format)
-                df_2 = df_2.loc[:current_date]
-                df_2 = df_2.iloc[-(returns_lookback + n_backtest_days):]
-
-                # The spread between the two tickers.
-                df_1['spread'] = df_1['close'] / df_2['close']
-
-                # The rolling mean and std dev. of the spread.
-                df_1['spread_mean'] = df_1['spread'].rolling(20).mean()
-                df_1['spread_std'] = df_1['spread'].rolling(20).std()
-
-                # Normalise the mean and std. dev.
-                df_1['spread_norm'] = (df_1['spread'] - df_1['spread'].mean()) / df_1['spread'].std()
-                df_1['spread_norm_mean'] = df_1['spread_norm'].rolling(20).mean()
-                df_1['spread_norm_std'] = df_1['spread_norm'].rolling(20).std()
-                # df_1['spread_mean_norm'] = (df_1['spread_mean'] - df_1['spread_mean'].mean()) / df_1['spread_mean'].std()
-                # df_1['spread_std_norm'] = (df_1['spread_std'] - df_1['spread_std'].mean()) / df_1['spread_std'].std()
-
-                backtest_sharpe = backtest_sharpes[pair_ind]
-                backtest_profitable = 1 if backtest_sharpe > 0 else 0
-
-                print(pair)
-                trade_sharpe = trade_results[(pair[0], pair[1])][2]
-                trade_profitable = 1 if trade_sharpe > 0 else 0
-
-                fig, axes = plt.subplots(2, 1, squeeze=False)
-                ax = axes[0, 0]
-                ax.plot(df_1['spread'], c='blue')
-                ax.plot(df_1['spread_mean'], c='orange')
-                ax.plot(df_1['spread_mean'] + 2 * df_1['spread_std'], c='green')
-                ax.plot(df_1['spread_mean'] - 2 * df_1['spread_std'], c='green')
-                ax.grid()
-                ax.set_title(f'Sharpe {backtest_sharpe}')
-                ax = axes[1, 0]
-                ax.plot(df_1['spread_norm'], c='blue')
-                ax.plot(df_1['spread_norm_mean'], c='orange')
-                ax.plot(df_1['spread_norm_mean'] + 2 * df_1['spread_norm_std'], c='green')
-                ax.plot(df_1['spread_norm_mean'] - 2 * df_1['spread_norm_std'], c='green')
-                ax.grid()
-                plt.savefig(current_out_dir / f'backtest_spread_{ticker_1}-{ticker_2}.png')
-                plt.close(fig)
-
-                df_1 = df_1.dropna()
-                results_str = f'{current_date}, {ticker_1}, {ticker_2}, '
-                spread_norm_means = list(df_1['spread_norm_mean'])
-                spread_norm_stds = list(df_1['spread_norm_std'])
-                for spread_mean in spread_norm_means:
-                    results_str += f'{spread_mean}, '
-                for spread_std in spread_norm_stds:
-                    results_str += f'{spread_std}, '
-                results_str += f'{backtest_sharpe}, {backtest_profitable}, {trade_sharpe}, {trade_profitable}'
-                backtest_results_file.write(f'{results_str}\n')
-                backtest_results_file.flush()
+            output_spreads(pairs_vae, filenames_all, current_date, n_backtest_days, returns_lookback, backtest_results,
+                           trade_results, backtest_results_file, current_out_dir, datetime_format)
 
         # Move forward to the next period
         current_date = trade_end_date
@@ -527,7 +530,7 @@ def test():
         vae.load_state_dict(checkpoint['model_state_dict'])
 
     ticker_files = glob(str(Path(c['in_dir']) / '*.csv'))
-    if 0:
+    if 1:
         ticker_files = ticker_files[:100]
     print(f'Found {len(ticker_files)} ticker files.')
 
