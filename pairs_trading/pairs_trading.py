@@ -309,7 +309,24 @@ class Stock:
 
         return tick_price
 
-    def update_data(self, current_date: datetime, ib: IB, random_data_stddev=0, preload_filename=None):
+    def get_tick_historical(self, dt: datetime, ib: IB, random_tick_stddev=0):
+        """
+        Gets a tick at a historical date (the close price). For backtesting, assuming the close price is the
+        tick price we would have gotten.
+        """
+        # Load historical data from IB.
+        print(f'Requesting historical tick price for stock {self.ticker} at date {dt}.')
+        ib_data = ib.request_historical_data(self.ticker, 1, last_date=dt)
+        tick_price = ib_data.iloc[-1]['close']
+
+        if random_tick_stddev != 0:
+            noise = np.random.normal(0, tick_price * random_tick_stddev)
+            tick_price += noise
+
+        return tick_price
+
+
+    def update_data(self, current_date: datetime, ib: IB, use_latest_date, random_data_stddev=0):
         """
         Update the stock's daily bar data.
         """
@@ -329,7 +346,7 @@ class Stock:
         # last_date = dates[-1]
         # print(f'Requesting historical data for stock {self.ticker} at date {last_date.strftime("%Y%m%d %H:%M:%S")}')
         print(f'Requesting historical data for stock {self.ticker} at most recent date.')
-        ib_data = ib.request_historical_data(self.ticker, 21, last_date=None)
+        ib_data = ib.request_historical_data(self.ticker, 21, last_date=None if use_latest_date else current_date)
         # print(ib_data.to_string())
 
         if random_data_stddev != 0:
@@ -355,15 +372,15 @@ class Pair:
 
         self.out_dir = out_dir
 
-    def update_data(self, date: datetime, ib: IB, random_data_stddev=0):
+    def update_data(self, date: datetime, ib: IB, use_latest_date, random_data_stddev=0):
         """
         Updates the pair data at the given date.
         Data is currently re-retrieved and calculated, rather than updated.
         """
         print(f'Updating data for pair ({self.stock_1.ticker}, {self.stock_2.ticker}) to date P={date}.')
         # Update the bars for both stocks.
-        self.stock_1.update_data(date, ib, random_data_stddev)
-        self.stock_2.update_data(date, ib, random_data_stddev)
+        self.stock_1.update_data(date, ib, use_latest_date, random_data_stddev)
+        self.stock_2.update_data(date, ib, use_latest_date, random_data_stddev)
         
         # Compute the pair data.
         stock_1_data = self.stock_1.data[['date', 'close']].rename(columns={'close': 'close_1'})
@@ -385,15 +402,19 @@ class Pair:
 
         return pair_data
 
-    def generate_trades(self, data_filename, pair_position_df, date, ib, random_tick_stddev=0):
+    def generate_trades(self, data_filename, pair_position_df, date, ib, use_historical_tick=False, random_tick_stddev=0):
         """
         Analyses the current trade (if it exists), the MA, and bollinger bands, and triggers any trades.
         """
         pair_data = pd.read_csv(data_filename)
 
         # Get current price.
-        stock_1_tick = self.stock_1.get_tick(ib, random_tick_stddev)
-        stock_2_tick = self.stock_2.get_tick(ib, random_tick_stddev)
+        if not use_historical_tick:
+            stock_1_tick = self.stock_1.get_tick(ib, random_tick_stddev)
+            stock_2_tick = self.stock_2.get_tick(ib, random_tick_stddev)
+        else:
+            stock_1_tick = self.stock_1.get_tick_historical(date, ib, random_tick_stddev)
+            stock_2_tick = self.stock_2.get_tick_historical(date, ib, random_tick_stddev)
         current_price = self.multiplier * stock_1_tick / stock_2_tick
         print(f'Ticks: {stock_1_tick}, {stock_2_tick}, price {current_price}')
 
@@ -476,13 +497,21 @@ class PairsTradingStrategy:
     Main trading strategy logic.
     """
 
-    def __init__(self, pairs: List[Pair], out_dir, out_filename, positions_filename, ib, ignore_dt=False, random_data_stddev=0, random_tick_stddev=0):
+    def __init__(self, pairs: List[Pair], out_dir, out_filename, positions_filename, ib,
+                 is_backtest, backtest_start, backtest_end,
+                 ignore_dt=False, random_data_stddev=0, random_tick_stddev=0):
         self.pairs = pairs
         self.out_dir = out_dir
         self.out_filename = out_filename
         self.positions_filename = positions_filename
         self.ib = ib
-        self.ignore_dt = ignore_dt
+
+        self.is_backtest = is_backtest
+        self.backtest_start = backtest_start
+        self.backtest_end = backtest_end
+
+        # self.ignore_dt = ignore_dt
+
         self.random_data_stddev = random_data_stddev
         self.random_tick_stddev = random_tick_stddev
 
@@ -500,69 +529,82 @@ class PairsTradingStrategy:
         daily_trades_done = False
         daily_position_updates_done = False
 
-        if self.ignore_dt:
-            # The number of the day into the simulation, when testing.
-            dummy_day_num = 0
+        # if self.ignore_dt:
+        #     # The number of the day into the simulation, when testing.
+        #     dummy_day_num = 0
+
+        if self.is_backtest:
+            # Generate the trading dates within the backtest period.
+            date_format = '%Y-%m-%d'
+            nyse_sched = nyse.schedule(
+                start_date=self.backtest_start.strftime(date_format),
+                end_date=self.backtest_end.strftime(date_format))
+            backtest_dates = mcal.date_range(nyse_sched, frequency='1D')
+            backtest_day_num = 0
 
         while True:
-            dt = datetime.now(tz=tz)
+            if not self.is_backtest:
+                dt = datetime.now(tz=tz)
+            else:
+                if backtest_day_num == len(backtest_dates):
+                    break
+                dt = backtest_dates[backtest_day_num]
             print(dt)
 
             # Sleep through non-trade days.
-            if not self.ignore_dt:
-                date_format = '%Y-%m-%d'
-                current_date_str = dt.strftime(date_format)
-                nyse_sched = nyse.schedule(
-                    start_date=(dt - timedelta(days=1)).strftime(date_format),
-                    end_date=current_date_str)
-                latest_trade_date = mcal.date_range(nyse_sched, frequency='1D')[-1]
-                latest_trade_date_str = latest_trade_date.strftime(date_format)
-                if current_date_str != latest_trade_date_str:
-                    # This isn't a trade day. Sleep a while.
-                    print(f'Not a trade day. Sleeping {sleep_time_long} seconds.')
-                    time.sleep(sleep_time_long)
-                    continue
+            date_format = '%Y-%m-%d'
+            current_date_str = dt.strftime(date_format)
+            nyse_sched = nyse.schedule(
+                start_date=(dt - timedelta(days=1)).strftime(date_format),
+                end_date=current_date_str)
+            latest_trade_date = mcal.date_range(nyse_sched, frequency='1D')[-1]
+            latest_trade_date_str = latest_trade_date.strftime(date_format)
+            if current_date_str != latest_trade_date_str:
+                # This isn't a trade day. Sleep a while.
+                print(f'Not a trade day. Sleeping {sleep_time_long} seconds.')
+                time.sleep(sleep_time_long)
+                continue
 
-            if self.ignore_dt:
-                # Go to the next day, so we can simulate the progression of days.
-                dt = dt + timedelta(days=dummy_day_num)
+            # if self.ignore_dt:
+            #     # Go to the next day, so we can simulate the progression of days.
+            #     dt = dt + timedelta(days=dummy_day_num)
 
             # At 12:00AM reset the update flags.
-            if (not daily_reset_done and dt.hour == 0 and dt.minute >= 0) or self.ignore_dt:
+            if (not daily_reset_done and dt.hour == 0 and dt.minute >= 0) or self.is_backtest:
                 print(f'Resetting update flags at time {dt}.')
                 daily_reset_done = True
                 daily_data_updates_done = False
-                daily_orders_done = False
-                daily_trade_updates_done = False
+                daily_trades_done = False
+                daily_position_updates_done = False
 
             # At 3:30PM update time series.
-            if not (daily_data_updates_done and dt.hour == 15 and dt.minute >= 30) or self.ignore_dt:  # 15:30
+            if not (daily_data_updates_done and dt.hour == 15 and dt.minute >= 30) or self.is_backtest:  # 15:30
                 print(f'Updating data at time {dt}.')
                 # When testing, Use the current dt to get historical data.
-                update_dt = dt if not self.ignore_dt else dt - timedelta(days=dummy_day_num)
+                update_dt = dt #if not self.ignore_dt else dt - timedelta(days=dummy_day_num)
                 self.update_data(update_dt, dt, self.ib)
                 print(f'Finished updating data at time {dt}.')
                 daily_data_updates_done = True
 
             # At 3:30PM place enter/exit orders.
-            if (not daily_trades_done and dt.hour == 15 and dt.minute >= 30) or self.ignore_dt:  # 15:30
+            if (not daily_trades_done and dt.hour == 15 and dt.minute >= 30) or self.is_backtest:  # 15:30
                 print(f'Generating trades at time {dt}.')
                 exit_trades, enter_trades = self.generate_trades(dt, self.ib)
                 print(f'Finished generating trades at time {dt}.')
                 daily_trades_done = True
 
             # At 4:30PM update trades.
-            if (not daily_position_updates_done and dt.hour == 16 and dt.minute >= 30) or self.ignore_dt:
+            if (not daily_position_updates_done and dt.hour == 16 and dt.minute >= 30) or self.is_backtest:
                 print(f'Updating positions at time {dt}.')
                 self.update_positions(dt, self.ib)
                 print(f'Finished positions at time {dt}.')
                 daily_position_updates_done = True
                 daily_reset_done = False
 
-            if self.ignore_dt:
-                dummy_day_num += 1
+            if self.is_backtest:
+                backtest_day_num += 1
 
-            if not self.ignore_dt:
+            if not self.is_backtest:
                 time.sleep(sleep_time_short)
             # return
 
@@ -583,7 +625,9 @@ class PairsTradingStrategy:
             close_ib_connection = True
 
         for pair in self.pairs:
-            pair_data = pair.update_data(date, ib, self.random_data_stddev)
+            # Get pair data.
+            # Use the latest date if we're not backtesting.
+            pair_data = pair.update_data(date, ib, not self.is_backtest, self.random_data_stddev)
             pair_data.to_csv(self.form_pair_data_filename(filename_date, pair), index=False)
 
         if close_ib_connection:
@@ -611,7 +655,7 @@ class PairsTradingStrategy:
                 (positions_df['stock_2'] == pair.stock_2.ticker) &
                 (positions_df['is_open'] == 1)]
             pair_data_filename = self.form_pair_data_filename(date, pair)
-            exit_trade, enter_trade = pair.generate_trades(pair_data_filename, pair_position_df, date, ib, self.random_tick_stddev)
+            exit_trade, enter_trade = pair.generate_trades(pair_data_filename, pair_position_df, date, ib, self.is_backtest, self.random_tick_stddev)
             if exit_trade is not None:
                 exit_trades.append(exit_trade)
             if enter_trade is not None:
@@ -756,8 +800,13 @@ def main():
 
     # For testing, a use this std. dev. to apply random noise to the returned prices.
     # Portion of the stock price.
-    random_data_stddev = 0.1
-    random_tick_stddev = 0.1
+    random_data_stddev = 0.
+    random_tick_stddev = 0.
+
+    # Backtesting options.
+    is_backtest = True
+    backtest_start = datetime.strptime('2020-01-01', '%Y-%m-%d')
+    backtest_end = datetime.strptime('2020-02-01', '%Y-%m-%d')
 
     if not positions_filename.exists():
         initialise_positions_file(positions_filename)
@@ -777,14 +826,20 @@ def main():
 
     pairs = create_pairs(pairs_filename, total_capital, lookback, n_std_dev, out_dir)
 
-    pairs = pairs[:1]
+    # pairs = pairs[:1]
 
     out_filename = out_dir / 'trades.csv'
 
-    strategy = PairsTradingStrategy(pairs, out_dir, out_filename, positions_filename, ib, ignore_dt=ignore_dt,
+    strategy = PairsTradingStrategy(pairs, out_dir, out_filename, positions_filename, ib,
+                                    is_backtest=is_backtest, backtest_start=backtest_start, backtest_end=backtest_end,
+                                    ignore_dt=ignore_dt,
                                     random_data_stddev=random_data_stddev, random_tick_stddev=random_tick_stddev)
     strategy.run()
-    ib.close()
+
+    if ib is not None:
+        ib.close()
+
+    print('FINISHED TRADING.')
 
 
 if __name__ == '__main__':

@@ -29,7 +29,7 @@ def get_latest_data(data_filename):
     return data
 
 
-def plot_pair_data(filenames, ax):
+def plot_pair_data(pair, filenames, ax):
     # Extract data from the data files.
     filenames.sort()
     data_list = [get_latest_data(f) for f in filenames]
@@ -48,6 +48,11 @@ def plot_pair_data(filenames, ax):
     ax.plot(dates, means)
     ax.plot(dates, bollinger_tops)
     ax.plot(dates, bollinger_bottom)
+
+    ax.set_title(pair)
+    ax.grid(True)
+
+    ax.format_xdata = mdates.DateFormatter('%Y-%m-%d')
 
 
 def plot_pair_trades(filenames, ax):
@@ -70,21 +75,22 @@ def main():
     print(pair_data_filenames)
 
     # Plot each pair.
-    num_pairs = len(pair_data_filenames)
+    pairs = list(pair_data_filenames.keys())[:3]
+    pairs.sort()
+    num_pairs = len(pairs)
     num_cols = 3
     num_rows = math.ceil(num_pairs / num_cols)
     fig, axes = plt.subplots(num_rows, num_cols)
-    pairs = list(pair_data_filenames.keys())
-    pairs.sort()
+    fig.tight_layout()
     for pair, ax in zip(pairs, axes.flatten()):
         data_filenames = pair_data_filenames[pair]
         print(pair)
         print(data_filenames)
-        plot_pair_data(data_filenames, ax)
+        plot_pair_data(pair, data_filenames, ax)
 
-        ax.format_xdata = mdates.DateFormatter('%Y-%m-%d')
 
     fig.autofmt_xdate()
+
     plt.show()
 
 
