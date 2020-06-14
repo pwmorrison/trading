@@ -154,7 +154,7 @@ class IB:
         return data
 
 
-    def request_tick_data(self, ticker):
+    def request_tick_data(self, ticker, max_num_tries=10):
         """
         Requests current tick data for the given ticker.
         """
@@ -169,7 +169,8 @@ class IB:
 
         # Retrieve the data from the callback when it arrives.
         received_data = False
-        while True:
+        num_tries = 0
+        while num_tries < max_num_tries:
             if len(self.callback.tick_Price) > 0:
                 data = pd.DataFrame(
                     self.callback.tick_Price, 
@@ -186,7 +187,8 @@ class IB:
                         time.sleep(2)
                         continue
                     break
-            print(f'Waiting for tick data for ticker {ticker}, with ID {tickerId}.')
+            print(f'Waiting for tick data for ticker {ticker}, with ID {tickerId}, after try {num_tries} of {max_num_tries}.')
+            num_tries += 1
             time.sleep(2)
 
         self.tws.cancelMktData(tickerId)
@@ -196,10 +198,26 @@ class IB:
 
         # Reset the tick_Price data.
         self.callback.tick_Price = []
-        
-        return data[['Type', 'price']]
 
-    def request_historical_data(self, ticker: str, last_date: datetime, num_days: int):
+        if not received_data:
+            data = None
+        
+        return data
+
+    def request_tick_data_repeat(self, ticker, max_num_tries):
+        """
+        Wrapper around request_tick_data, that makes a given number of attempts.
+        On each attempt, a new connection is established.
+        """
+        num_tries = 0
+        while num_tries < max_num_tries:
+            data = self.request_tick_data(ticker)
+            if data is not None:
+                break
+            num_tries += 1
+        return data
+
+    def request_historical_data(self, ticker: str, num_days: int, last_date: datetime = None):
         """
         https://interactivebrokers.github.io/tws-api/historical_bars.html
         http://interactivebrokers.github.io/tws-api/classIBApi_1_1EClient.html#aad87a15294377608e59aec1d87420594
@@ -212,7 +230,7 @@ class IB:
         # Example: To get 3 days ending on 1/7/2013, use the last second of 1/7/2013 as the endDateTime, 
         # and 3D as the durationStr.
 
-        data_endtime = last_date.strftime("%Y%m%d %H:%M:%S")
+        data_endtime = '' if last_date is None else last_date.strftime("%Y%m%d %H:%M:%S")
 
         # Request the data.
         # reqHistoricalData(self, tickerId, contract, endDateTime, durationStr, barSizeSetting, whatToShow, useRTH, formatDate):
@@ -248,8 +266,8 @@ class IB:
 
         data['date'] = pd.to_datetime(data['date'])
         data.set_index('date')
-        
-        # TODO: Filter the columns we want.
+        # print(data.to_string())
+
         return data[['date', 'open', 'high', 'low', 'close', 'volume', 'count']]
 
     def close(self):
@@ -270,14 +288,10 @@ class Stock:
         pd.to_datetime(df['date'])
         return df
 
-    def load_current_bar(self): 
-        tick_data = self.ib.request_tick_data(self.ticker)
-        print(tick_data)
-        # TODO: Append this to the bar data.
-
-    def get_tick(self, ib: IB):
+    def get_tick(self, ib: IB, random_tick_stddev=0):
         print(f'Getting tick data for stock {self.ticker}')
-        tick_data = ib.request_tick_data(self.ticker)
+        tick_data = ib.request_tick_data_repeat(self.ticker, max_num_tries=5)
+        # TODO: Handle when we can't get tick data.
         # print(tick_data.to_string())
         print(tick_data)
 
@@ -289,10 +303,13 @@ class Stock:
         print(tick_row)
         tick_price = tick_row['price'].values[0]
 
+        if random_tick_stddev != 0:
+            noise = np.random.normal(0, tick_price * random_tick_stddev)
+            tick_price += noise
+
         return tick_price
 
-
-    def update_data(self, current_date: datetime, ib: IB, preload_filename=None):
+    def update_data(self, current_date: datetime, ib: IB, random_data_stddev=0, preload_filename=None):
         """
         Update the stock's daily bar data.
         """
@@ -309,12 +326,16 @@ class Stock:
         # print(dates)
 
         # Load historical data from IB.
-        last_date = dates[-1]
-        print(f'Requesting historical data for stock {self.ticker} at date {last_date.strftime("%Y%m%d %H:%M:%S")}')
-        ib_data = ib.request_historical_data(self.ticker, last_date, 21)
+        # last_date = dates[-1]
+        # print(f'Requesting historical data for stock {self.ticker} at date {last_date.strftime("%Y%m%d %H:%M:%S")}')
+        print(f'Requesting historical data for stock {self.ticker} at most recent date.')
+        ib_data = ib.request_historical_data(self.ticker, 21, last_date=None)
         # print(ib_data.to_string())
 
-        # TODO: We probably want to merge, for when we are updating.
+        if random_data_stddev != 0:
+            noise = np.random.normal(0, ib_data['close'] * random_data_stddev)
+            ib_data['close'] += noise
+
         self.data = ib_data
 
 
@@ -334,15 +355,15 @@ class Pair:
 
         self.out_dir = out_dir
 
-    def update_data(self, date: datetime, ib: IB):
+    def update_data(self, date: datetime, ib: IB, random_data_stddev=0):
         """
         Updates the pair data at the given date.
         Data is currently re-retrieved and calculated, rather than updated.
         """
         print(f'Updating data for pair ({self.stock_1.ticker}, {self.stock_2.ticker}) to date P={date}.')
         # Update the bars for both stocks.
-        self.stock_1.update_data(date, ib)
-        self.stock_2.update_data(date, ib)
+        self.stock_1.update_data(date, ib, random_data_stddev)
+        self.stock_2.update_data(date, ib, random_data_stddev)
         
         # Compute the pair data.
         stock_1_data = self.stock_1.data[['date', 'close']].rename(columns={'close': 'close_1'})
@@ -364,15 +385,15 @@ class Pair:
 
         return pair_data
 
-    def generate_trades(self, data_filename, pair_position_df, date, ib):
+    def generate_trades(self, data_filename, pair_position_df, date, ib, random_tick_stddev=0):
         """
         Analyses the current trade (if it exists), the MA, and bollinger bands, and triggers any trades.
         """
         pair_data = pd.read_csv(data_filename)
 
         # Get current price.
-        stock_1_tick = self.stock_1.get_tick(ib)
-        stock_2_tick = self.stock_2.get_tick(ib)
+        stock_1_tick = self.stock_1.get_tick(ib, random_tick_stddev)
+        stock_2_tick = self.stock_2.get_tick(ib, random_tick_stddev)
         current_price = self.multiplier * stock_1_tick / stock_2_tick
         print(f'Ticks: {stock_1_tick}, {stock_2_tick}, price {current_price}')
 
@@ -392,8 +413,8 @@ class Pair:
             if self.is_exit(current_price, last_mean, is_long):
                 size_1 = pair_position_df['size_1'].item()
                 size_2 = pair_position_df['size_2'].item()
-                exit_trade = Trade(self, date, current_price, not is_long, last_mean,
-                                   last_bollinger_top, last_bollinger_bottom,
+                exit_trade = Trade(self, date, not is_long, current_price,
+                                   last_mean, last_bollinger_top, last_bollinger_bottom,
                                    size_1, size_2)
 
         # Determine if the pair has a trade to enter.
@@ -405,7 +426,7 @@ class Pair:
                 # Create a new trade.
                 size_1 = round(self.capital / 2 / stock_1_tick)
                 size_2 = round(self.capital / 2 / stock_2_tick)
-                enter_trade = Trade(self, date, current_price, is_long,
+                enter_trade = Trade(self, date, is_long, current_price,
                                     last_mean, last_bollinger_top, last_bollinger_bottom,
                                     size_1, size_2)
 
@@ -438,11 +459,11 @@ class Pair:
 
 
 class Trade:
-    def __init__(self, pair, date, trigger_price, is_buy, last_mean, last_bollinger_top, last_bollinger_bottom, size_1, size_2):
+    def __init__(self, pair, date, is_buy, trigger_price, last_mean, last_bollinger_top, last_bollinger_bottom, size_1, size_2):
         self.pair = pair
         self.date = date
-        self.trigger_price = trigger_price
         self.is_buy = is_buy
+        self.trigger_price = trigger_price
         self.last_mean = last_mean
         self.last_bollinger_top = last_bollinger_top
         self.last_bollinger_bottom = last_bollinger_bottom
@@ -455,12 +476,15 @@ class PairsTradingStrategy:
     Main trading strategy logic.
     """
 
-    def __init__(self, pairs: List[Pair], out_dir, out_filename, positions_filename, ib):
+    def __init__(self, pairs: List[Pair], out_dir, out_filename, positions_filename, ib, ignore_dt=False, random_data_stddev=0, random_tick_stddev=0):
         self.pairs = pairs
         self.out_dir = out_dir
         self.out_filename = out_filename
         self.positions_filename = positions_filename
         self.ib = ib
+        self.ignore_dt = ignore_dt
+        self.random_data_stddev = random_data_stddev
+        self.random_tick_stddev = random_tick_stddev
 
         self.current_trades = []
 
@@ -476,26 +500,35 @@ class PairsTradingStrategy:
         daily_trades_done = False
         daily_position_updates_done = False
 
+        if self.ignore_dt:
+            # The number of the day into the simulation, when testing.
+            dummy_day_num = 0
+
         while True:
             dt = datetime.now(tz=tz)
             print(dt)
 
-            date_format = '%Y-%m-%d'
-            current_date_str = dt.strftime(date_format)
-            nyse_sched = nyse.schedule(
-                start_date=(dt - timedelta(days=1)).strftime(date_format),
-                end_date=current_date_str)
-            latest_trade_date = mcal.date_range(nyse_sched, frequency='1D')[-1]
-            latest_trade_date_str = latest_trade_date.strftime(date_format)
+            # Sleep through non-trade days.
+            if not self.ignore_dt:
+                date_format = '%Y-%m-%d'
+                current_date_str = dt.strftime(date_format)
+                nyse_sched = nyse.schedule(
+                    start_date=(dt - timedelta(days=1)).strftime(date_format),
+                    end_date=current_date_str)
+                latest_trade_date = mcal.date_range(nyse_sched, frequency='1D')[-1]
+                latest_trade_date_str = latest_trade_date.strftime(date_format)
+                if current_date_str != latest_trade_date_str:
+                    # This isn't a trade day. Sleep a while.
+                    print(f'Not a trade day. Sleeping {sleep_time_long} seconds.')
+                    time.sleep(sleep_time_long)
+                    continue
 
-            if current_date_str != latest_trade_date_str:
-                # This isn't a trade day. Sleep a while.
-                print(f'Not a trade day. Sleeping {sleep_time_long} seconds.')
-                time.sleep(sleep_time_long)
-                continue
+            if self.ignore_dt:
+                # Go to the next day, so we can simulate the progression of days.
+                dt = dt + timedelta(days=dummy_day_num)
 
             # At 12:00AM reset the update flags.
-            if not daily_reset_done and dt.hour == 0 and dt.minute >= 0:
+            if (not daily_reset_done and dt.hour == 0 and dt.minute >= 0) or self.ignore_dt:
                 print(f'Resetting update flags at time {dt}.')
                 daily_reset_done = True
                 daily_data_updates_done = False
@@ -503,34 +536,43 @@ class PairsTradingStrategy:
                 daily_trade_updates_done = False
 
             # At 3:30PM update time series.
-            if not daily_data_updates_done and dt.hour == 15 and dt.minute >= 30:  # 15:30
+            if not (daily_data_updates_done and dt.hour == 15 and dt.minute >= 30) or self.ignore_dt:  # 15:30
                 print(f'Updating data at time {dt}.')
-                self.update_data(dt, self.ib)
+                # When testing, Use the current dt to get historical data.
+                update_dt = dt if not self.ignore_dt else dt - timedelta(days=dummy_day_num)
+                self.update_data(update_dt, dt, self.ib)
+                print(f'Finished updating data at time {dt}.')
                 daily_data_updates_done = True
 
             # At 3:30PM place enter/exit orders.
-            if not daily_trades_done and dt.hour == 15 and dt.minute >= 30:  # 15:30
+            if (not daily_trades_done and dt.hour == 15 and dt.minute >= 30) or self.ignore_dt:  # 15:30
                 print(f'Generating trades at time {dt}.')
                 exit_trades, enter_trades = self.generate_trades(dt, self.ib)
+                print(f'Finished generating trades at time {dt}.')
                 daily_trades_done = True
 
             # At 4:30PM update trades.
-            if not daily_position_updates_done and dt.hour == 16 and dt.minute >= 30:
+            if (not daily_position_updates_done and dt.hour == 16 and dt.minute >= 30) or self.ignore_dt:
                 print(f'Updating positions at time {dt}.')
                 self.update_positions(dt, self.ib)
+                print(f'Finished positions at time {dt}.')
                 daily_position_updates_done = True
                 daily_reset_done = False
 
-            time.sleep(sleep_time_short)
+            if self.ignore_dt:
+                dummy_day_num += 1
+
+            if not self.ignore_dt:
+                time.sleep(sleep_time_short)
             # return
 
     def form_pair_data_filename(self, dt, pair):
-        return str(self.out_dir / f'{dt.strftime("%Y-%m-%d")}_{pair.stock_1.ticker}_{pair.stock_2.ticker}.csv')
+        return str(self.out_dir / f'{dt.strftime("%Y-%m-%d")}_data_{pair.stock_1.ticker}-{pair.stock_2.ticker}.csv')
 
     def form_trades_filename(self, dt):
         return str(self.out_dir / f'{dt.strftime("%Y-%m-%d")}_trades.csv')
 
-    def update_data(self, date: datetime, ib: IB):
+    def update_data(self, date: datetime, filename_date: datetime, ib: IB):
         """
         Updates all data for all pairs.
         """
@@ -541,8 +583,8 @@ class PairsTradingStrategy:
             close_ib_connection = True
 
         for pair in self.pairs:
-            pair_data = pair.update_data(date, ib)
-            pair_data.to_csv(self.form_pair_data_filename(date, pair), index=False)
+            pair_data = pair.update_data(date, ib, self.random_data_stddev)
+            pair_data.to_csv(self.form_pair_data_filename(filename_date, pair), index=False)
 
         if close_ib_connection:
             ib.close()
@@ -564,9 +606,12 @@ class PairsTradingStrategy:
         enter_trades = []
         for pair in self.pairs:
             # The current position for this pair.
-            pair_position_df = positions_df[(positions_df['stock_1'] == pair.stock_1.ticker) & (positions_df['stock_2'] == pair.stock_2.ticker)]
+            pair_position_df = positions_df[
+                (positions_df['stock_1'] == pair.stock_1.ticker) &
+                (positions_df['stock_2'] == pair.stock_2.ticker) &
+                (positions_df['is_open'] == 1)]
             pair_data_filename = self.form_pair_data_filename(date, pair)
-            exit_trade, enter_trade = pair.generate_trades(pair_data_filename, pair_position_df, date, ib)
+            exit_trade, enter_trade = pair.generate_trades(pair_data_filename, pair_position_df, date, ib, self.random_tick_stddev)
             if exit_trade is not None:
                 exit_trades.append(exit_trade)
             if enter_trade is not None:
@@ -580,14 +625,16 @@ class PairsTradingStrategy:
         # Output trades.
         # TODO: Probably also record some kind of order ID returned by IB.
         with open(self.form_trades_filename(date), 'w') as f:
-            f.write(f'stock_1,stock_2,trigger_price,is_buy,is_exit,last_mean,last_bollinger_top,last_bollinger_bottom,size_1,size_2\n')
+            f.write(f'stock_1,stock_2,is_exit,is_buy,trigger_price,last_mean,last_bollinger_top,last_bollinger_bottom,size_1,size_2\n')
             for trade in exit_trades:
-                f.write(f'{trade.pair.stock_1.ticker},{trade.pair.stock_2.ticker},{trade.trigger_price},'
-                        f'{trade.is_buy},1,{trade.last_mean},{trade.last_bollinger_top},{trade.last_bollinger_bottom},'
+                f.write(f'{trade.pair.stock_1.ticker},{trade.pair.stock_2.ticker},1,{1 if trade.is_buy else 0},'
+                        f'{trade.trigger_price},{trade.last_mean},'
+                        f'{trade.last_bollinger_top},{trade.last_bollinger_bottom},'
                         f'{trade.size_1},{trade.size_2}\n')
             for trade in enter_trades:
-                f.write(f'{trade.pair.stock_1.ticker},{trade.pair.stock_2.ticker},{trade.trigger_price},'
-                        f'{trade.is_buy},0,{trade.last_mean},{trade.last_bollinger_top},{trade.last_bollinger_bottom},'
+                f.write(f'{trade.pair.stock_1.ticker},{trade.pair.stock_2.ticker},0,{1 if trade.is_buy else 0},'
+                        f'{trade.trigger_price},{trade.last_mean},'
+                        f'{trade.last_bollinger_top},{trade.last_bollinger_bottom},'
                         f'{trade.size_1},{trade.size_2}\n')
 
         if close_ib_connection:
@@ -700,10 +747,17 @@ def initialise_positions_file(positions_filename):
 def main():
     total_capital = 100000
     lookback = 20
-    n_std_dev = 0.2
+    n_std_dev = 1
     pairs_filename = r'D:/data/pairs_trading/pairs2020.csv'
     out_dir = Path(r'D:/data/pairs_trading/out')
     positions_filename = out_dir / 'positions.csv'
+
+    ignore_dt = True
+
+    # For testing, a use this std. dev. to apply random noise to the returned prices.
+    # Portion of the stock price.
+    random_data_stddev = 0.1
+    random_tick_stddev = 0.1
 
     if not positions_filename.exists():
         initialise_positions_file(positions_filename)
@@ -723,11 +777,12 @@ def main():
 
     pairs = create_pairs(pairs_filename, total_capital, lookback, n_std_dev, out_dir)
 
-    # pairs = pairs[:3]
+    pairs = pairs[:1]
 
     out_filename = out_dir / 'trades.csv'
 
-    strategy = PairsTradingStrategy(pairs, out_dir, out_filename, positions_filename, ib)
+    strategy = PairsTradingStrategy(pairs, out_dir, out_filename, positions_filename, ib, ignore_dt=ignore_dt,
+                                    random_data_stddev=random_data_stddev, random_tick_stddev=random_tick_stddev)
     strategy.run()
     ib.close()
 
