@@ -12,6 +12,8 @@ from IBWrapper import IBWrapper, contract
 from ib.ext.EClientSocket import EClientSocket
 from ib.ext.ScannerSubscription import ScannerSubscription
 
+from ib_wrapper import IB_IBInsync
+
 
 """
 https://github.com/anthonyng2/ib/blob/master/IbPy%20Demo%20v2018-04-05.ipynb
@@ -279,7 +281,7 @@ class Stock:
         self.ticker = ticker
         self.lookback = lookback
         # Store the bars in a data frame, with a row per day.
-        self.data = self._init_bars_data()
+        # self.data = self._init_bars_data()
         
     def _init_bars_data(self):
         column_names = ['date', 'open', 'high', 'low', 'close', 'is_closed']
@@ -290,18 +292,25 @@ class Stock:
 
     def get_tick(self, ib: IB, random_tick_stddev=0):
         print(f'Getting tick data for stock {self.ticker}')
-        tick_data = ib.request_tick_data_repeat(self.ticker, max_num_tries=5)
+        if 0:
+            tick_data = ib.request_tick_data_repeat(self.ticker, max_num_tries=10)
+        else:
+            tick_data = ib.request_historical_tick_data(self.ticker)
         # TODO: Handle when we can't get tick data.
-        # print(tick_data.to_string())
-        print(tick_data)
+        print(tick_data.to_string())
 
-        # Use the last price if it exists, else use the close price.
-        if 'LAST_PRICE' in tick_data['Type'].values:
-            tick_row = tick_data[tick_data['Type'] == 'LAST_PRICE']
-        elif 'CLOSE_PRICE' in tick_data['Type'].values:
-            tick_row = tick_data[tick_data['Type'] == 'CLOSE_PRICE']
-        print(tick_row)
-        tick_price = tick_row['price'].values[0]
+        if 0:
+            # Old code. The new code already does this filtering.
+            # Use the last price if it exists, else use the close price.
+            if 'LAST_PRICE' in tick_data['Type'].values:
+                tick_row = tick_data[tick_data['Type'] == 'LAST_PRICE']
+            elif 'CLOSE_PRICE' in tick_data['Type'].values:
+                tick_row = tick_data[tick_data['Type'] == 'CLOSE_PRICE']
+            print(tick_row)
+        else:
+            tick_row = tick_data
+        # tick_price = tick_row['price'].values[0]
+        tick_price = tick_row['price'].mean()
 
         if random_tick_stddev != 0:
             noise = np.random.normal(0, tick_price * random_tick_stddev)
@@ -330,17 +339,18 @@ class Stock:
         """
         Update the stock's daily bar data.
         """
-        # Get recent NYSE trading days.
-        date_format = '%Y-%m-%d'
-        nyse_sched = nyse.schedule(
-            start_date=(current_date - timedelta(days=40)).strftime(date_format), 
-            end_date=current_date.strftime(date_format))
-        dates = mcal.date_range(nyse_sched, frequency='1D')
+        if 0:
+            # Get recent NYSE trading days.
+            date_format = '%Y-%m-%d'
+            nyse_sched = nyse.schedule(
+                start_date=(current_date - timedelta(days=40)).strftime(date_format),
+                end_date=current_date.strftime(date_format))
+            dates = mcal.date_range(nyse_sched, frequency='1D')
 
-        # Get the dates we want to load.
-        # Load an extra day, in case we're trading today and the extra day is needed for later calculations.
-        dates = dates[-(self.lookback + 1):]
-        # print(dates)
+            # Get the dates we want to load.
+            # Load an extra day, in case we're trading today and the extra day is needed for later calculations.
+            dates = dates[-(self.lookback + 1):]
+            # print(dates)
 
         # Load historical data from IB.
         # last_date = dates[-1]
@@ -353,7 +363,9 @@ class Stock:
             noise = np.random.normal(0, ib_data['close'] * random_data_stddev)
             ib_data['close'] += noise
 
-        self.data = ib_data
+        # self.data = ib_data
+
+        return ib_data
 
 
 class Pair:
@@ -379,12 +391,12 @@ class Pair:
         """
         print(f'Updating data for pair ({self.stock_1.ticker}, {self.stock_2.ticker}) to date P={date}.')
         # Update the bars for both stocks.
-        self.stock_1.update_data(date, ib, use_latest_date, random_data_stddev)
-        self.stock_2.update_data(date, ib, use_latest_date, random_data_stddev)
+        stock_1_data = self.stock_1.update_data(date, ib, use_latest_date, random_data_stddev)
+        stock_2_data = self.stock_2.update_data(date, ib, use_latest_date, random_data_stddev)
         
         # Compute the pair data.
-        stock_1_data = self.stock_1.data[['date', 'close']].rename(columns={'close': 'close_1'})
-        stock_2_data = self.stock_2.data[['date', 'close']].rename(columns={'close': 'close_2'})
+        stock_1_data = stock_1_data[['date', 'close']].rename(columns={'close': 'close_1'})
+        stock_2_data = stock_2_data[['date', 'close']].rename(columns={'close': 'close_2'})
         pair_data = stock_1_data.merge(stock_2_data)
 
         # Update moving average, standard deviation, and bollinger bands.
@@ -524,7 +536,7 @@ class PairsTradingStrategy:
 
         sleep_time_short = 30  # seconds
         sleep_time_long = 10 * 60
-        daily_reset_done = False
+        daily_reset_done = True
         daily_data_updates_done = False
         daily_trades_done = False
         daily_position_updates_done = False
@@ -540,6 +552,8 @@ class PairsTradingStrategy:
                 start_date=self.backtest_start.strftime(date_format),
                 end_date=self.backtest_end.strftime(date_format))
             backtest_dates = mcal.date_range(nyse_sched, frequency='1D')
+            backtest_dates = [ts.to_pydatetime() for ts in backtest_dates]
+            print(backtest_dates)
             backtest_day_num = 0
 
         while True:
@@ -577,8 +591,8 @@ class PairsTradingStrategy:
                 daily_trades_done = False
                 daily_position_updates_done = False
 
-            # At 3:30PM update time series.
-            if not (daily_data_updates_done and dt.hour == 15 and dt.minute >= 30) or self.is_backtest:  # 15:30
+            # At 2:30PM update time series.
+            if (not daily_data_updates_done and dt.hour == 14 and dt.minute >= 30) or self.is_backtest:  # 15:30
                 print(f'Updating data at time {dt}.')
                 # When testing, Use the current dt to get historical data.
                 update_dt = dt #if not self.ignore_dt else dt - timedelta(days=dummy_day_num)
@@ -614,6 +628,13 @@ class PairsTradingStrategy:
     def form_trades_filename(self, dt):
         return str(self.out_dir / f'{dt.strftime("%Y-%m-%d")}_trades.csv')
 
+    def create_ib_connection(self):
+        if 0:
+            ib = IB(ACCOUNT_NAME, HOST, PORT, CLIENT_ID)
+        else:
+            ib = IB_IBInsync(ACCOUNT_NAME, HOST, PORT, CLIENT_ID)
+        return ib
+
     def update_data(self, date: datetime, filename_date: datetime, ib: IB):
         """
         Updates all data for all pairs.
@@ -621,7 +642,7 @@ class PairsTradingStrategy:
         close_ib_connection = False
         if ib is None:
             # We need to open a new connection.
-            ib = IB(ACCOUNT_NAME, HOST, PORT, CLIENT_ID)
+            ib = self.create_ib_connection()
             close_ib_connection = True
 
         for pair in self.pairs:
@@ -640,12 +661,13 @@ class PairsTradingStrategy:
         close_ib_connection = False
         if ib is None:
             # We need to open a new connection.
-            ib = IB(ACCOUNT_NAME, HOST, PORT, CLIENT_ID)
+            ib = self.create_ib_connection()
             close_ib_connection = True
 
         # Read current positions.
         positions_df = pd.read_csv(self.positions_filename)
 
+        # Generate trades.
         exit_trades = []
         enter_trades = []
         for pair in self.pairs:
@@ -664,22 +686,35 @@ class PairsTradingStrategy:
         print(f'Exit trades: {exit_trades}')
         print(f'Enter trades: {enter_trades}')
 
-        # TODO: Generate orders and send the orders to the IB interface.
+        # Generate orders and send the orders to the IB interface.
+        for trade in exit_trades + enter_trades:
+            print(f'Placing order for trade: {trade}')
+            if trade.is_buy:
+                ib_trade_1 = ib.place_moc_order(trade.pair.stock_1.ticker, trade.size_1, is_buy=True)
+                ib_trade_2 = ib.place_moc_order(trade.pair.stock_2.ticker, trade.size_2, is_buy=False)
+            else:
+                ib_trade_1 = ib.place_moc_order(trade.pair.stock_1.ticker, trade.size_1, is_buy=False)
+                ib_trade_2 = ib.place_moc_order(trade.pair.stock_2.ticker, trade.size_2, is_buy=True)
+            while ib_trade_1.order.permId == 0 or ib_trade_2.order.permId == 0:
+                ib.sleep(1)
+            trade.order_id_1 = ib_trade_1.order.permId
+            trade.order_id_2 = ib_trade_2.order.permId
 
         # Output trades.
-        # TODO: Probably also record some kind of order ID returned by IB.
         with open(self.form_trades_filename(date), 'w') as f:
-            f.write(f'stock_1,stock_2,is_exit,is_buy,trigger_price,last_mean,last_bollinger_top,last_bollinger_bottom,size_1,size_2\n')
+            f.write(f'stock_1,stock_2,is_exit,is_buy,trigger_price,last_mean,last_bollinger_top,last_bollinger_bottom,size_1,size_2,orderid_1,orderid_2\n')
             for trade in exit_trades:
                 f.write(f'{trade.pair.stock_1.ticker},{trade.pair.stock_2.ticker},1,{1 if trade.is_buy else 0},'
                         f'{trade.trigger_price},{trade.last_mean},'
                         f'{trade.last_bollinger_top},{trade.last_bollinger_bottom},'
-                        f'{trade.size_1},{trade.size_2}\n')
+                        f'{trade.size_1},{trade.size_2},'
+                        f'{trade.order_id_1},{trade.order_id_2}\n')
             for trade in enter_trades:
                 f.write(f'{trade.pair.stock_1.ticker},{trade.pair.stock_2.ticker},0,{1 if trade.is_buy else 0},'
                         f'{trade.trigger_price},{trade.last_mean},'
                         f'{trade.last_bollinger_top},{trade.last_bollinger_bottom},'
-                        f'{trade.size_1},{trade.size_2}\n')
+                        f'{trade.size_1},{trade.size_2},'
+                        f'{trade.order_id_1},{trade.order_id_2}\n')
 
         if close_ib_connection:
             ib.close()
@@ -806,7 +841,7 @@ def main():
     # Backtesting options.
     is_backtest = True
     backtest_start = datetime.strptime('2020-01-01', '%Y-%m-%d')
-    backtest_end = datetime.strptime('2020-02-01', '%Y-%m-%d')
+    backtest_end = datetime.strptime('2020-01-02', '%Y-%m-%d')
 
     if not positions_filename.exists():
         initialise_positions_file(positions_filename)
