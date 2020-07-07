@@ -144,7 +144,18 @@ def train():
                 # compute ELBO estimate and accumulate loss
                 val_loss += svi.evaluate_loss(x_1, x_2, y)
 
-                if 1:
+                if 0:
+                    z_1_loc, z_1_scale, z_1_sample = vae.encode_x(x_1)
+                    z_2_loc, z_2_scale, z_2_sample = vae.encode_x(x_2)
+                    y_pred = torch.sigmoid(z_1_loc - z_2_loc)
+                    y_pred[y_pred >= 0.5] = 1
+                    y_pred[y_pred < 0.5] = 0
+                    y = torch.unsqueeze(y, dim=1)
+                    y_pred_y = torch.cat([y_pred, y], dim=1)
+                    print(f'y_pred vs y: {y_pred_y}')
+                    # return
+
+                if 0:
                     # Make some rank predictions.
                     z_1_loc, z_1_scale, z_1_sample = vae.encode_x(x_1)
                     z_2_loc, z_2_scale, z_2_sample = vae.encode_x(x_2)

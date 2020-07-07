@@ -12,6 +12,7 @@ class Encoder(nn.Module):
         self.input_dim = input_dim
         # setup the three linear transformations used
         self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc11 = nn.Linear(hidden_dim, hidden_dim)
         self.fc21 = nn.Linear(hidden_dim, z_dim)
         self.fc22 = nn.Linear(hidden_dim, z_dim)
         # setup the non-linearities
@@ -23,6 +24,7 @@ class Encoder(nn.Module):
         x = x.reshape(-1, self.input_dim)
         # then compute the hidden units
         hidden = self.softplus(self.fc1(x))
+        hidden = self.softplus(self.fc11(hidden))
         # then return a mean vector and a (positive) square root covariance
         # each of size batch_size x z_dim
         z_loc = self.fc21(hidden)
@@ -82,7 +84,7 @@ class VAE(nn.Module):
             z_2_scale = torch.ones(x_2.shape[0], self.z_dim, dtype=x_2.dtype, device=x_2.device)
             # sample from prior (value will be sampled by guide when computing the ELBO)
             z_1 = pyro.sample("latent_1", dist.Normal(z_1_loc, z_1_scale).to_event(1))
-            z_2 = pyro.sample("latent_2", dist.Normal(z_1_loc, z_1_scale).to_event(1))
+            z_2 = pyro.sample("latent_2", dist.Normal(z_2_loc, z_2_scale).to_event(1))
             # decode the latent code z
             if 0:
                 loc_img = self.decoder.forward(z_1)

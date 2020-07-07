@@ -9,7 +9,7 @@
   "x_length": 20,
   "y_length": 5,
   "cuda": true,
-  "learning_rate": 0.01,
+  "learning_rate": 0.001,
   "n_epochs": 100,
   "batch_size": 64,
   "z_dim": 1,
