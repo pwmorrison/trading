@@ -1,0 +1,15 @@
+{
+  "in_dir": "D:/projects/trading/mlbootcamp/tickers",
+  "out_dir": "out",
+  "test_start_date": "2018/01/01",
+  "test_end_date": null,
+  "series_length": 60,
+  "cuda": true,
+  "n_epochs": 10,
+  "batch_size": 64,
+  "z_dim": 20,
+  "normalised_returns": false,
+  "checkpoint_load": "out_saved/checkpoint_0035.pt",
+  "checkpoint_load": null,
+  "jit": false
+}
