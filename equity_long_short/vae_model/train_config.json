@@ -1,0 +1,19 @@
+{
+  "in_dir": "D:/projects/trading/mlbootcamp/tickers",
+  "out_dir": "out",
+  "train_start_date": "2010/01/01",
+  "train_end_date": "2018/01/01",
+  "val_start_date": "2018/01/01",
+  "val_end_date": "2020/01/01",
+  "series_length": 250,
+  "cuda": true,
+  "learning_rate": 0.001,
+  "n_epochs": 100,
+  "batch_size": 64,
+  "z_dim": 50,
+  "normalised_returns": true,
+  "checkpoint_load": null,
+  "checkpoint_save": "checkpoint_{:04d}.pt",
+  "val_frequency": 1,
+  "jit": false
+}
