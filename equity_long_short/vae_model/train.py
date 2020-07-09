@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
+
 import torch
 from torch.utils.data import DataLoader
 
@@ -17,16 +18,17 @@ from model import VAE
 
 def train():
     parser = argparse.ArgumentParser(description='Train VAE.')
-    parser.add_argument('-c', '--config', help='Config file.')
+    parser.add_argument('-c', '--config', default='train_config.json', help='Config file.')
     args = parser.parse_args()
     print(args)
     c = json.load(open(args.config))
     print(c)
 
-    # clear param store
     pyro.clear_param_store()
 
-    lookback = 50
+    # TODO: Move to config file.
+    lookback = 20
+    max_n_files = None
 
     train_start_date = datetime.strptime(c['train_start_date'], '%Y/%m/%d')
     train_end_date = datetime.strptime(c['train_end_date'], '%Y/%m/%d')
@@ -34,7 +36,6 @@ def train():
     val_end_date = datetime.strptime(c['val_end_date'], '%Y/%m/%d')
     min_sequence_length_train = 2 * (c['series_length'] + lookback)
     min_sequence_length_test = 2 * (c['series_length'] + lookback)
-    max_n_files = None
 
     out_path = Path(c['out_dir'])
     out_path.mkdir(exist_ok=True)

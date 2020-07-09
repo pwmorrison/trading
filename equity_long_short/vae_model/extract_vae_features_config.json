@@ -1,0 +1,28 @@
+{
+  "in_dir": "D:/projects/trading/mlbootcamp/tickers",
+  "out_dir": "D:/projects/trading/mlbootcamp/out",
+  "fundamentals_file": "D:/projects/trading/mlbootcamp/snapshot_df.csv",
+  "start_date": "2020/01/01",
+  "end_date": "2020/01/01",
+  "n_lookback_days": 60,
+  "n_backtest_days": 120,
+  "n_trade_days": 120,
+  "n_pairs_vae": 200,
+  "n_pairs_backtest": 200,
+  "vae_series_length": 60,
+  "cuda": false,
+  "batch_size": 64,
+  "z_dim": 50,
+  "normalised_returns": true,
+  "checkpoint_load": "out_saved_60day/checkpoint_0035.pt",
+  "jit": false,
+
+  "r_script_exe": "C:/Program Files/R/R-3.6.1/bin/Rscript.exe",
+  "r_backtest_script": "D:/projects/trading/mlbootcamp/backtest_pairsfile.R",
+  "r_trade_script": "D:/projects/trading/mlbootcamp/backtest_pairsfile.R",
+  "backtest_sd": 2,
+  "backtest_returns_file": "D:/projects/trading/mlbootcamp/out/backtest_returns.csv",
+  "backtest_plot_file": "D:/projects/trading/mlbootcamp/out/backtest_plot.jpeg",
+  "trade_returns_file": "D:/projects/trading/mlbootcamp/out/trade_returns.csv",
+  "trade_plot_file": "D:/projects/trading/mlbootcamp/out/trade_plot.jpeg"
+}
