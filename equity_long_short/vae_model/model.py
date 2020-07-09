@@ -7,13 +7,14 @@ import pyro.distributions as dist
 # define the PyTorch module that parameterizes the
 # diagonal gaussian distribution q(z|x)
 class Encoder(nn.Module):
-    def __init__(self, input_dim, z_dim, hidden_dim):
+    def __init__(self, input_dim, z_dim, hidden_dims):
         super(Encoder, self).__init__()
         self.input_dim = input_dim
         # setup the three linear transformations used
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc21 = nn.Linear(hidden_dim, z_dim)
-        self.fc22 = nn.Linear(hidden_dim, z_dim)
+        self.fc11 = nn.Linear(input_dim, hidden_dims[0])
+        self.fc12 = nn.Linear(hidden_dims[0], hidden_dims[1])
+        self.fc21 = nn.Linear(hidden_dims[1], z_dim)
+        self.fc22 = nn.Linear(hidden_dims[1], z_dim)
         # setup the non-linearities
         self.softplus = nn.Softplus()
 
@@ -22,33 +23,36 @@ class Encoder(nn.Module):
         # first shape the mini-batch to have pixels in the rightmost dimension
         x = x.reshape(-1, self.input_dim)
         # then compute the hidden units
-        hidden = self.softplus(self.fc1(x))
+        x = self.softplus(self.fc11(x))
+        x = self.softplus(self.fc12(x))
         # then return a mean vector and a (positive) square root covariance
         # each of size batch_size x z_dim
-        z_loc = self.fc21(hidden)
-        z_scale = torch.exp(self.fc22(hidden))
+        z_loc = self.fc21(x)
+        z_scale = torch.exp(self.fc22(x))
         return z_loc, z_scale
 
 
 # define the PyTorch module that parameterizes the
 # observation likelihood p(x|z)
 class Decoder(nn.Module):
-    def __init__(self, z_dim, hidden_dim, output_dim):
+    def __init__(self, z_dim, hidden_dims, output_dim):
         super(Decoder, self).__init__()
         # setup the two linear transformations used
-        self.fc1 = nn.Linear(z_dim, hidden_dim)
-        self.fc21 = nn.Linear(hidden_dim, output_dim)
+        self.fc11 = nn.Linear(z_dim, hidden_dims[1])
+        self.fc12 = nn.Linear(hidden_dims[1], hidden_dims[0])
+        self.fc21 = nn.Linear(hidden_dims[0], output_dim)
         # setup the non-linearities
         self.softplus = nn.Softplus()
 
     def forward(self, z):
         # define the forward computation on the latent z
         # first compute the hidden units
-        hidden = self.softplus(self.fc1(z))
+        x = self.softplus(self.fc11(z))
+        x = self.softplus(self.fc12(x))
         # return the parameter for the output Bernoulli
         # each is of size batch_size x 784
         # loc_img = torch.sigmoid(self.fc21(hidden))
-        loc_img = self.fc21(hidden)
+        loc_img = self.fc21(x)
         return loc_img
 
 
@@ -56,11 +60,11 @@ class Decoder(nn.Module):
 class VAE(nn.Module):
     # by default our latent space is 50-dimensional
     # and we use 400 hidden units
-    def __init__(self, x_dim, z_dim=50, hidden_dim=400, use_cuda=False):
+    def __init__(self, x_dim, z_dim=50, hidden_dims=[100, 100], use_cuda=False):
         super(VAE, self).__init__()
         # create the encoder and decoder networks
-        self.encoder = Encoder(x_dim, z_dim, hidden_dim)
-        self.decoder = Decoder(z_dim, hidden_dim, x_dim)
+        self.encoder = Encoder(x_dim, z_dim, hidden_dims)
+        self.decoder = Decoder(z_dim, hidden_dims, x_dim)
 
         if use_cuda:
             # calling cuda() here will put all the parameters of

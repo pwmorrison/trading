@@ -57,7 +57,7 @@ def train():
     print(f'N_train_data: {N_train_data}, N_val_data: {N_val_data}')
 
     # setup the VAE
-    vae = VAE(c['series_length'], z_dim=c['z_dim'], use_cuda=c['cuda'])
+    vae = VAE(c['series_length'], z_dim=c['z_dim'], hidden_dims=c['hidden_dims'], use_cuda=c['cuda'])
 
     # setup the optimizer
     adam_args = {"lr": c['learning_rate']}
