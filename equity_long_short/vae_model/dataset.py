@@ -1,18 +1,37 @@
-import torch
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from torch.utils.data import Dataset, DataLoader
-import glob
+from glob import glob
 from pathlib import Path
 import os
 
+import torch
+from torch.utils.data import Dataset, DataLoader
+
+"""
+VAE PyTorch dataset.
+"""
+
+def read_ticker_csv(filename, datetime_format):
+    df = pd.read_csv(filename)
+    df['date'] = pd.to_datetime(df['date'], format=datetime_format)
+    df.set_index('date', inplace=True)
+    return df
+
 
 class TickerDataset(Dataset):
+    """
+    Provides returns series of single stocks.
+    """
 
     def __init__(self, root_dir, series_length, lookback, min_sequence_length, template='*.csv', transform=None,
                  start_date=None, end_date=None, fixed_start_date=False, datetime_format='%Y-%m-%d',
                  normalised_returns=False, max_n_files=None):
+        """
+        lookback -- The lookback used to compute rolling z-score, when normalising returns.
+        fixed_start_date -- If True, always returns the series at the start date of it's history. If False,
+        returns random series within its history.
+        """
         self.series_length = series_length
         self.lookback = lookback
         self.transform = transform
@@ -23,18 +42,13 @@ class TickerDataset(Dataset):
         self.normalised_returns = normalised_returns
 
         # Only keep tickers with length less than a minimum.
-        ticker_files = glob.glob(str(Path(root_dir) / template))
+        ticker_files = glob(str(Path(root_dir) / template))
         if max_n_files:
             ticker_files = ticker_files[:max_n_files]
         self.ticker_files = []
         print(f'Finding tickers with sufficient length, from {len(ticker_files)} files.')
         for ticker_file in ticker_files:
-
-            if 0:
-                if os.path.basename(ticker_file) != 'MS_prices.csv':
-                    continue
-
-            df = read_csv(ticker_file, self.datetime_format)
+            df = read_ticker_csv(ticker_file, self.datetime_format)
 
             # Identify the indices within the given date range.
             if start_date and end_date:
@@ -62,21 +76,8 @@ class TickerDataset(Dataset):
                 continue
 
             self.ticker_files.append(ticker_file)
-            continue
 
-            # start_date_index = np.
-
-            # Get the index of the start date.
-            start_date_row = df.index.get_loc(self.start_date)
-
-            if self.start_date:
-                df = df.loc[self.start_date:]
-            if self.end_date:
-                df = df.loc[:self.end_date]
-
-            if df.shape[0] >= min_sequence_length:
-                self.ticker_files.append(ticker_file)
-        print(f'Found {len(self.ticker_files)} files.')
+        print(f'Found {len(self.ticker_files)} files of sufficient length.')
 
     def __len__(self):
         return len(self.ticker_files)
@@ -86,13 +87,14 @@ class TickerDataset(Dataset):
             idx = idx.tolist()
 
         filename = self.ticker_files[idx]
-        df = read_csv(filename, self.datetime_format)
+        df = read_ticker_csv(filename, self.datetime_format)
 
         # Calculate a rolling z-score.
         df['returns'] = df['close'].pct_change()
         if self.normalised_returns:
             # Normalised returns.
-            df['returns'] = (df['returns'] - df['returns'].rolling(self.lookback).mean()) / df['returns'].rolling(self.lookback).std()
+            df['returns'] = (df['returns'] - df['returns'].rolling(self.lookback).mean()) / (
+                df['returns'].rolling(self.lookback).std())
 
         if 0:
             # Return close prices.
@@ -108,6 +110,7 @@ class TickerDataset(Dataset):
 
         returns = np.array(df['returns'])
 
+        # Extract a sub-series from this history.
         if self.fixed_start_date:
             # Get a series at the start date.
             start = 0
@@ -115,6 +118,7 @@ class TickerDataset(Dataset):
             # Get a random sub-series.
             start = np.random.randint(0, returns.shape[0] - self.series_length)
         series = returns[start: start + self.series_length]
+
         # Add extra feature dimension.
         series = series[..., np.newaxis]
         # Convert to torch tensor.
@@ -132,13 +136,6 @@ class TickerDataset(Dataset):
         return sample
 
 
-def read_csv(filename, datetime_format):
-    df = pd.read_csv(filename)
-    df['date'] = pd.to_datetime(df['date'], format=datetime_format)
-    df.set_index('date', inplace=True)
-    return df
-
-
 def create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length,
                           start_date=None, end_date=None, fixed_start_date=False,
                           normalised_returns=False, max_n_files=None):
@@ -149,47 +146,30 @@ def create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length
 
 
 def test_ticker_dataset():
-    root_dir = r'D:\projects\trading\mlbootcamp\tickers'
+    root_dir = r'E:\data\mlbootcamp\tickers'
     series_length = 200
-    lookback = 200
+    lookback = 20
     min_sequence_length = 2 * (series_length + lookback)
     max_n_files = 100
+    start_date = "2010/01/01"
+    end_date = "2018/01/01"
 
-    dataset = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length, max_n_files=max_n_files)
+    dataset = create_ticker_dataset(root_dir, series_length, lookback, min_sequence_length,
+        start_date=start_date, end_date=end_date, max_n_files=max_n_files)
+    print(len(dataset))
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=0)
 
     for b, batch in enumerate(dataloader):
+        # series is a tensor of shape [batch_size, series_length, 1]
         series = batch['series']
+        # filename is a list of length batch_size
         filename = batch['filename']
+        # dates is a list of length series_length. Each element is a list of length batch_size.
         dates = batch['dates']
-        print(b, series.shape, filename, dates)
 
-
-def main():
-
-    df = pd.read_csv(r'D:\projects\trading\mlbootcamp\tickers\AAPL_prices.csv')
-
-    # Calculate a rolling z-score.
-    lookback = 200
-    df['returns'] = df['close'].pct_change()
-    df['returns'] = (df['returns'] - df['returns'].rolling(lookback).mean()) / df['returns'].rolling(lookback).std()
-
-    fig, axes = plt.subplots(1, 1, squeeze=False)
-    ax = axes[0, 0]
-    # ax.plot(df['date'], df['close'])
-
-
-    # df['close'].plot()
-    df['returns'].plot()
-    # df['mean'].plot()
-
-
-
-    plt.show()
-
-    print(df.info())
+        print(series.shape, len(filename), len(dates))
+        print(len(dates[0]))
 
 
 if __name__ == '__main__':
     test_ticker_dataset()
-    # main()

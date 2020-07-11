@@ -1,0 +1,28 @@
+{
+  "in_dir": "E:/data/mlbootcamp/tickers",
+  "out_dir": "E:/data/mlbootcamp/equity_long_short/out",
+  "fundamentals_file": "E:/data/mlbootcamp/snapshot_df.csv",
+  "start_date": "2018/01/01",
+  "end_date": "2020/01/01",
+  "returns_lookback": 20,
+  "###n_backtest_days": 120,
+  "###n_trade_days": 120,
+  "###n_pairs_vae": 200,
+  "###n_pairs_backtest": 200,
+  "vae_series_length": 60,
+  "cuda": true,
+  "batch_size": 64,
+  "z_dim": 10,
+  "normalised_returns": false,
+  "checkpoint_load": "out_saved_60day/checkpoint_0035.pt",
+  "jit": false,
+
+  "###r_script_exe": "C:/Program Files/R/R-3.6.1/bin/Rscript.exe",
+  "###r_backtest_script": "D:/projects/trading/mlbootcamp/backtest_pairsfile.R",
+  "###r_trade_script": "D:/projects/trading/mlbootcamp/backtest_pairsfile.R",
+  "###backtest_sd": 2,
+  "###backtest_returns_file": "D:/projects/trading/mlbootcamp/out/backtest_returns.csv",
+  "###backtest_plot_file": "D:/projects/trading/mlbootcamp/out/backtest_plot.jpeg",
+  "###trade_returns_file": "D:/projects/trading/mlbootcamp/out/trade_returns.csv",
+  "###trade_plot_file": "D:/projects/trading/mlbootcamp/out/trade_plot.jpeg"
+}
