@@ -12,9 +12,9 @@ class Encoder(nn.Module):
         self.input_dim = input_dim
         # setup the three linear transformations used
         self.fc11 = nn.Linear(input_dim, hidden_dims[0])
-        self.fc12 = nn.Linear(hidden_dims[0], hidden_dims[1])
-        self.fc21 = nn.Linear(hidden_dims[1], z_dim)
-        self.fc22 = nn.Linear(hidden_dims[1], z_dim)
+        #self.fc12 = nn.Linear(hidden_dims[0], hidden_dims[1])
+        self.fc21 = nn.Linear(hidden_dims[0], z_dim)
+        self.fc22 = nn.Linear(hidden_dims[0], z_dim)
         # setup the non-linearities
         self.softplus = nn.Softplus()
 
@@ -24,7 +24,7 @@ class Encoder(nn.Module):
         x = x.reshape(-1, self.input_dim)
         # then compute the hidden units
         x = self.softplus(self.fc11(x))
-        x = self.softplus(self.fc12(x))
+        # x = self.softplus(self.fc12(x))
         # then return a mean vector and a (positive) square root covariance
         # each of size batch_size x z_dim
         z_loc = self.fc21(x)
@@ -38,8 +38,8 @@ class Decoder(nn.Module):
     def __init__(self, z_dim, hidden_dims, output_dim):
         super(Decoder, self).__init__()
         # setup the two linear transformations used
-        self.fc11 = nn.Linear(z_dim, hidden_dims[1])
-        self.fc12 = nn.Linear(hidden_dims[1], hidden_dims[0])
+        self.fc11 = nn.Linear(z_dim, hidden_dims[0])
+        #self.fc12 = nn.Linear(hidden_dims[1], hidden_dims[0])
         self.fc21 = nn.Linear(hidden_dims[0], output_dim)
         # setup the non-linearities
         self.softplus = nn.Softplus()
@@ -48,7 +48,7 @@ class Decoder(nn.Module):
         # define the forward computation on the latent z
         # first compute the hidden units
         x = self.softplus(self.fc11(z))
-        x = self.softplus(self.fc12(x))
+        #x = self.softplus(self.fc12(x))
         # return the parameter for the output Bernoulli
         # each is of size batch_size x 784
         # loc_img = torch.sigmoid(self.fc21(hidden))

@@ -27,7 +27,7 @@ def train():
     pyro.clear_param_store()
 
     # TODO: Move to config file.
-    lookback = 20
+    lookback = 50
     max_n_files = None
 
     train_start_date = datetime.strptime(c['train_start_date'], '%Y/%m/%d')
