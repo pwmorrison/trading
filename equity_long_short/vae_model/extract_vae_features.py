@@ -484,7 +484,7 @@ def form_start_dates(start_date, end_date, period):
     return dates
 
 
-def get_series_ending_at_date(ticker_file, end_date, series_length, returns_lookback, normalised_returns,
+def get_returns_ending_at_date(ticker_file, end_date, series_length, norm_lookback, normalised_returns,
     datetime_format='%Y-%m-%d'):
     """
     """
@@ -497,36 +497,42 @@ def get_series_ending_at_date(ticker_file, end_date, series_length, returns_look
     # Calculate a rolling returns.
     df['returns'] = df['close'].pct_change()
     if normalised_returns:
-        # Normalised returns.
-        df['returns'] = (df['returns'] - df['returns'].rolling(self.lookback).mean()) / (
-            df['returns'].rolling(self.lookback).std())
+        # Normalise using a rolling mean and std. dev.
+        df['returns'] = (df['returns'] - df['returns'].rolling(norm_lookback).mean()) / (
+            df['returns'].rolling(norm_lookback).std())
     df = df.dropna()
 
     # Get the final series_length elements of the df.
     df = df.iloc[-series_length:]
 
-    return df
-
-    # Filter dates *after* calculating returns, so previous dates can be used in the lookback.
-    if self.start_date:
-        df = df.loc[self.start_date:]
-    if self.end_date:
-        df = df.loc[:self.end_date]
-
+    # Extract the returns columns.
     returns = np.array(df['returns'])
 
-    # Extract a sub-series from this history.
-    if self.fixed_start_date:
-        # Get a series at the start date.
-        start = 0
-    else:
-        # Get a random sub-series.
-        start = np.random.randint(0, returns.shape[0] - self.series_length)
-    series = returns[start: start + self.series_length]
+    return df, returns
 
 
+def get_returns_starting_at_date(ticker_file, start_date, series_length, datetime_format='%Y-%m-%d'):
+    """
+    """
+    df = read_ticker_csv(ticker_file, datetime_format)
+    # Only keep data from the given start date, but keep some days to calculate return.
+    df = df[df.index >= (start_date - timedelta(7))]
 
-def extract_vae_features(start_date, end_date, series_length, returns_lookback, vae, ticker_files,
+    # Calculate a rolling returns.
+    df['returns'] = df['close'].pct_change()
+    df = df.dropna()
+
+    # Extract the dates we are interested in.
+    df = df[df.index >= start_date]
+    df = df.iloc[:series_length]
+
+    # Extract the returns columns.
+    returns = np.array(df['returns'])
+
+    return df, returns
+
+
+def extract_vae_features(start_date, end_date, series_length, norm_lookback, vae, ticker_files,
     fundamentals_df, out_path):
     """
     Extracts the VAE features of each ticker at repeating consecutive periods within the given date range.
@@ -540,9 +546,18 @@ def extract_vae_features(start_date, end_date, series_length, returns_lookback, 
         print(current_date)
         for ticker_file in ticker_files:
             print(ticker_file)
-            input_series = get_series_ending_at_date(ticker_file, current_date, series_length, returns_lookback,
+            # The returns series prior to this date.
+            _, past_returns = get_returns_ending_at_date(ticker_file, current_date, series_length, norm_lookback,
                 normalised_returns=False)
-            print(input_series)
+            print(f'Past returns: {past_returns}')
+
+            # Get the VAE features for this returns series.
+
+
+            # X-day returns following the current date.
+            _, forward_returns = get_returns_starting_at_date(ticker_file, current_date, series_length)
+            print(f'Forward returns: {forward_returns}')
+
             return
 
 def main():

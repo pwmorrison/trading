@@ -12,7 +12,7 @@
   "vae_series_length": 60,
   "cuda": true,
   "batch_size": 64,
-  "z_dim": 10,
+  "z_dim": 50,
   "normalised_returns": false,
   "checkpoint_load": "out_saved_60day/checkpoint_0035.pt",
   "jit": false,
