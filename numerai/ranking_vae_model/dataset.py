@@ -34,7 +34,7 @@ class RankingDataset(Dataset):
         # TODO: Make target binary 0, 1.
         row = self.df.iloc[index]
         id = row[self.id_col]
-        features = np.array(row[self.feature_cols]).astype(float)
+        features = np.array(row[self.feature_cols]).astype(float) - 0.5
         target = row[self.target_col]
         return id, features, target
 

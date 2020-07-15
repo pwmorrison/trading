@@ -37,8 +37,8 @@ def train():
 
     dataset_train = create_ranking_dataset(c['training_filename'], max_n_examples=max_n_examples)
     dataset_val = create_ranking_dataset(c['training_filename'], max_n_examples=max_n_examples)
-    train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=0, drop_last=True)
-    val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=0, drop_last=True)
+    train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=2, drop_last=True)
+    val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=2, drop_last=True)
 
     N_train_data = len(dataset_train)
     N_val_data = len(dataset_val)
@@ -71,7 +71,8 @@ def train():
         epoch_loss = 0.
         # do a training epoch over each mini-batch x returned
         # by the data loader
-        for batch in train_loader:
+        for batch_num, batch in enumerate(train_loader):
+            # print(f'Batch {batch_num} of {N_mini_batches}.')
             features_1 = batch['features_1']
             features_2 = batch['features_2']
             target_class = batch['target_class']
@@ -97,6 +98,8 @@ def train():
 
         if epoch % c['val_frequency'] == 0:
             val_loss = 0.
+            true_positives = 0
+            num_val_examples = 0
 
             # Compute the loss over the validation set.
             for i, batch in enumerate(val_loader):
@@ -122,16 +125,19 @@ def train():
                     pred[pred < 0.5] = 0
                     target_class = torch.unsqueeze(target_class, dim=1)
                     pred_target = torch.cat([pred, target_class], dim=1)
-                    print(f'pred vs target: {pred_target}')
+                    # print(f'pred vs target: {pred_target}')
 
                     pred = pred.cpu().detach().numpy()
                     target_class = target_class.cpu().detach().numpy()
                     pred_correct = (pred == target_class).astype(int)
-                    print(pred_correct)
-                    print(target_class.shape)
-                    accuracy = torch.sum(pred_correct) / target_class.shape[1]
-                    print(accuracy)
-                    return
+                    # print(pred_correct)
+                    # print(target_class.shape)
+                    pred_correct.flatten()
+                    true_positives += np.sum(pred_correct)
+                    num_val_examples += pred_correct.shape[0]
+                    # accuracy = np.sum(pred_correct) / pred_correct.shape[0]
+                    # print('accuracy:', accuracy)
+                    # return
 
                 if 0:
                     # Make some rank predictions.
@@ -162,6 +168,9 @@ def train():
             total_epoch_loss_val = val_loss / normalizer_val
             val_elbo.append(total_epoch_loss_val)
             print("[epoch %03d]  average val loss: %.4f" % (epoch, total_epoch_loss_val))
+
+            accuracy = true_positives / num_val_examples
+            print(f'AccuracyL {accuracy}')
 
 
     print('Finished training.')
