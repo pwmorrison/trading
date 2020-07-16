@@ -12,9 +12,13 @@ import random
 
 class RankingDataset(Dataset):
 
-    def __init__(self, filename, max_n_examples=None):
+    def __init__(self, filename, start=0.0, end=1.0, skip_equal_target=True, max_n_examples=None):
         print(filename)
+        self.skip_equal_target = skip_equal_target
         self.df = pd.read_csv(filename)
+
+        num_rows = self.df.shape[0]
+        self.df = self.df.iloc[int(start * num_rows): int(end * num_rows)]
 
         if max_n_examples:
             self.df = self.df.iloc[:max_n_examples]
@@ -42,9 +46,13 @@ class RankingDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        indices = random.sample(range(self.df.shape[0]), 2)
-        id_1, features_1, target_1 = self.read_example(indices[0])
-        id_2, features_2, target_2 = self.read_example(indices[1])
+        while True:
+            indices = random.sample(range(self.df.shape[0]), 2)
+            id_1, features_1, target_1 = self.read_example(indices[0])
+            id_2, features_2, target_2 = self.read_example(indices[1])
+            if not self.skip_equal_target or target_1 != target_2:
+                break
+            #print(f'Skipping pair with targets {target_1}, {target_2}.')
 
         target_class = 1 if target_1 >= target_2 else 0
 
@@ -67,16 +75,18 @@ def read_csv(filename, datetime_format):
     return df
 
 
-def create_ranking_dataset(training_filename, max_n_examples=None):
-    dataset = RankingDataset(training_filename, max_n_examples=max_n_examples)
+def create_ranking_dataset(training_filename, start, end, max_n_examples=None):
+    dataset = RankingDataset(training_filename, start, end, max_n_examples=max_n_examples)
     return dataset
 
 
 def test_ranking_dataset():
     training_filename = r'E:\data\numerai\20200714\numerai_datasets\numerai_training_data_small.csv'
+    start = 0.0
+    end = 0.7
     max_n_examples = 100
 
-    dataset = create_ranking_dataset(training_filename, max_n_examples=max_n_examples)
+    dataset = create_ranking_dataset(training_filename, start, end, max_n_examples=max_n_examples)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=0)
 
     for b, batch in enumerate(dataloader):

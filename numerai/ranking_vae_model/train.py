@@ -35,8 +35,8 @@ def train():
     out_path = Path(c['out_dir'])
     out_path.mkdir(exist_ok=True)
 
-    dataset_train = create_ranking_dataset(c['training_filename'], max_n_examples=max_n_examples)
-    dataset_val = create_ranking_dataset(c['training_filename'], max_n_examples=max_n_examples)
+    dataset_train = create_ranking_dataset(c['training_filename'], 0.0, 0.7, max_n_examples=max_n_examples)
+    dataset_val = create_ranking_dataset(c['training_filename'], 0.7, 1.0, max_n_examples=max_n_examples)
     train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=2, drop_last=True)
     val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=2, drop_last=True)
 
@@ -66,13 +66,15 @@ def train():
     train_elbo = []
     val_elbo = []
     # training loop
-    for epoch in range(c['n_epochs']):
+    num_epochs = c['n_epochs']
+    for epoch in range(num_epochs):
+        print(f'Starting epoch {epoch} of {num_epochs}.')
         # initialize loss accumulator
         epoch_loss = 0.
         # do a training epoch over each mini-batch x returned
         # by the data loader
         for batch_num, batch in enumerate(train_loader):
-            # print(f'Batch {batch_num} of {N_mini_batches}.')
+            print(f'Batch {batch_num} of {N_mini_batches}.')
             features_1 = batch['features_1']
             features_2 = batch['features_2']
             target_class = batch['target_class']
@@ -97,6 +99,7 @@ def train():
         }, out_path / c['checkpoint_save'].format(epoch))
 
         if epoch % c['val_frequency'] == 0:
+            print('Evaluation validation data.')
             val_loss = 0.
             true_positives = 0
             num_val_examples = 0
@@ -170,7 +173,7 @@ def train():
             print("[epoch %03d]  average val loss: %.4f" % (epoch, total_epoch_loss_val))
 
             accuracy = true_positives / num_val_examples
-            print(f'AccuracyL {accuracy}')
+            print(f'Accuracy: {accuracy}')
 
 
     print('Finished training.')
