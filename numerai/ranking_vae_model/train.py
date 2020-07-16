@@ -37,8 +37,8 @@ def train():
 
     dataset_train = create_ranking_dataset(c['training_filename'], 0.0, 0.7, max_n_examples=max_n_examples)
     dataset_val = create_ranking_dataset(c['training_filename'], 0.7, 1.0, max_n_examples=max_n_examples)
-    train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=2, drop_last=True)
-    val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=2, drop_last=True)
+    train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=3, drop_last=True)
+    val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=3, drop_last=True)
 
     N_train_data = len(dataset_train)
     N_val_data = len(dataset_val)

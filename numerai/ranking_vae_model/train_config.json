@@ -1,5 +1,5 @@
 {
-  "training_filename": "E:/data/numerai/20200714/numerai_datasets/numerai_training_data.csv",
+  "training_filename": "D:/data/numerai/20200714/numerai_datasets/numerai_training_data.csv",
   "out_dir": "out",
   "num_features": 310,
   "cuda": true,

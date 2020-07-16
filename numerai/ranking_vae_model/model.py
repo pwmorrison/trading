@@ -13,6 +13,7 @@ class Encoder(nn.Module):
         # setup the three linear transformations used
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.fc11 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc12 = nn.Linear(hidden_dim, hidden_dim)
         self.fc21 = nn.Linear(hidden_dim, z_dim)
         self.fc22 = nn.Linear(hidden_dim, z_dim)
         # setup the non-linearities
@@ -25,6 +26,7 @@ class Encoder(nn.Module):
         # then compute the hidden units
         hidden = self.softplus(self.fc1(x))
         hidden = self.softplus(self.fc11(hidden))
+        hidden = self.softplus(self.fc12(hidden))
         # then return a mean vector and a (positive) square root covariance
         # each of size batch_size x z_dim
         z_loc = self.fc21(hidden)
