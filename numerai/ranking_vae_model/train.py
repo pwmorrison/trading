@@ -14,7 +14,7 @@ import pyro.distributions as dist
 from pyro.infer import SVI, JitTrace_ELBO, Trace_ELBO
 from pyro.optim import Adam
 
-from dataset import create_ranking_dataset
+from dataset_test import create_ranking_dataset
 from model import VAE
 
 
@@ -35,10 +35,17 @@ def train():
     out_path = Path(c['out_dir'])
     out_path.mkdir(exist_ok=True)
 
-    dataset_train = create_ranking_dataset(c['training_filename'], 0.0, 0.7, max_n_examples=max_n_examples)
-    dataset_val = create_ranking_dataset(c['training_filename'], 0.7, 1.0, max_n_examples=max_n_examples)
-    train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=3, drop_last=True)
-    val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=3, drop_last=True)
+    if 0:
+        dataset_train = create_ranking_dataset(c['training_filename'], 0.0, 0.7, max_n_examples=max_n_examples)
+        dataset_val = create_ranking_dataset(c['training_filename'], 0.7, 1.0, max_n_examples=max_n_examples)
+        train_loader = DataLoader(dataset_train, batch_size=c['batch_size'], shuffle=True, num_workers=3, drop_last=True)
+        val_loader = DataLoader(dataset_val, batch_size=c['batch_size'], shuffle=False, num_workers=3, drop_last=True)
+    else:
+        dataset_train = create_ranking_dataset(n_examples=100)
+        dataset_val = create_ranking_dataset(n_examples=100)
+        train_loader = DataLoader(dataset_train, batch_size=8, shuffle=True, num_workers=3, drop_last=True)
+        val_loader = DataLoader(dataset_val, batch_size=8, shuffle=False, num_workers=3, drop_last=True)
+        c['num_features'] = 2
 
     N_train_data = len(dataset_train)
     N_val_data = len(dataset_val)
